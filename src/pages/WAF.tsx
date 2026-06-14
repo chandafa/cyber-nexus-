@@ -1,10 +1,23 @@
-// src/pages/WAF.tsx — WAF control page with VHost and Custom Rules (MVP)
+// src/pages/WAF.tsx — WAF control page with VHost, Custom Rules, and Tooltips (MVP)
 import React, { useRef, useState, useEffect } from "react";
 import { Ic } from "../lib/icons";
 import { ModuleScaffold } from "../components/ModuleScaffold";
 import { type ScanConsoleHandle } from "../components/ScanConsole";
 import { buildArgs, runToolJson } from "../lib/tauri";
 import { useScanRuntimeStore } from "../app/store/scanRuntime.store";
+
+// Lightweight pure CSS-driven Info Tooltip
+const HelpTip: React.FC<{ text: string }> = ({ text }) => {
+  return (
+    <span className="relative group inline-block ml-1 cursor-pointer select-none text-nexus-muted hover:text-nexus-accent">
+      <span className="text-xs">ⓘ</span>
+      <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:inline-block w-48 p-2 text-[10.5px] font-normal normal-case leading-normal text-nexus-text bg-nexus-elevated border border-nexus-border rounded shadow-md z-50 text-center">
+        {text}
+        <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-nexus-elevated"></span>
+      </span>
+    </span>
+  );
+};
 
 export const WAF: React.FC = () => {
   const consoleRef = useRef<ScanConsoleHandle>(null);
@@ -251,11 +264,17 @@ export const WAF: React.FC = () => {
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="nx-label">Proxy Listen Port</label>
+                <label className="nx-label">
+                  Proxy Listen Port
+                  <HelpTip text="Port tempat WAF mendengarkan request masuk (HTTP/HTTPS). Contoh: 8080." />
+                </label>
                 <input className="nx-input font-mono" value={listenPort} onChange={(e) => setListenPort(e.target.value)} />
               </div>
               <div>
-                <label className="nx-label">Max Log Size (MB)</label>
+                <label className="nx-label">
+                  Max Log Size (MB)
+                  <HelpTip text="Batas kapasitas file database log. Jika terlampaui, 20% log terlama akan dihapus otomatis." />
+                </label>
                 <input className="nx-input font-mono" value={maxLogMb} onChange={(e) => setMaxLogMb(e.target.value)} />
               </div>
             </div>
@@ -263,16 +282,25 @@ export const WAF: React.FC = () => {
             <div className="border border-nexus-hairline p-3 rounded bg-nexus-panel/50 space-y-3">
               <h4 className="text-xs font-semibold text-nexus-text">Default Target Routing (Wildcard)</h4>
               <div>
-                <label className="nx-label">Default Backend Host</label>
+                <label className="nx-label">
+                  Default Backend Host
+                  <HelpTip text="Alamat IP/Host aplikasi web asli yang ingin Anda proteksi." />
+                </label>
                 <input className="nx-input font-mono" value={backendHost} onChange={(e) => setBackendHost(e.target.value)} />
               </div>
               <div>
-                <label className="nx-label">Default Backend Port</label>
+                <label className="nx-label">
+                  Default Backend Port
+                  <HelpTip text="Port aplikasi web asli Anda. Contoh: 8000." />
+                </label>
                 <input className="nx-input font-mono" value={backendPort} onChange={(e) => setBackendPort(e.target.value)} />
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="nx-label">Default Max RPS</label>
+                  <label className="nx-label">
+                    Default Max RPS
+                    <HelpTip text="Batas maksimum request per detik untuk setiap alamat IP client guna mencegah DoS." />
+                  </label>
                   <input className="nx-input font-mono" value={maxRps} onChange={(e) => setMaxRps(e.target.value)} />
                 </div>
                 <div className="flex items-end pb-1.5">
@@ -284,11 +312,15 @@ export const WAF: React.FC = () => {
                       className="h-4 w-4 rounded border-nexus-hairline bg-nexus-surface text-nexus-accent focus:ring-nexus-accent"
                     />
                     Learning Mode
+                    <HelpTip text="Jika aktif, serangan hanya dicatat ke log (detect:) tanpa diblokir (403)." />
                   </label>
                 </div>
               </div>
               <div>
-                <label className="nx-label">Allowlist IPs</label>
+                <label className="nx-label">
+                  Allowlist IPs
+                  <HelpTip text="Daftar IP (dipisah koma) yang diizinkan mem-bypass pemeriksaan keamanan WAF." />
+                </label>
                 <input
                   className="nx-input font-mono text-xs"
                   value={allowlistIps}
@@ -297,7 +329,10 @@ export const WAF: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="nx-label">Allowlist Paths</label>
+                <label className="nx-label">
+                  Allowlist Paths
+                  <HelpTip text="Daftar path URL (dipisah koma) yang dikecualikan dari pemblokiran WAF. Contoh: /assets." />
+                </label>
                 <input
                   className="nx-input font-mono text-xs"
                   value={allowlistPaths}
@@ -310,7 +345,10 @@ export const WAF: React.FC = () => {
             {/* SSL/TLS termination configs */}
             <div className="border border-nexus-hairline p-3 rounded bg-nexus-panel/50 space-y-3">
               <div className="flex items-center justify-between">
-                <h4 className="text-xs font-semibold text-nexus-text">SSL/TLS Termination</h4>
+                <h4 className="text-xs font-semibold text-nexus-text">
+                  SSL/TLS Termination
+                  <HelpTip text="WAF menerima koneksi HTTPS aman, mendekripsinya, lalu meneruskannya secara HTTP biasa ke backend Anda." />
+                </h4>
                 <label className="relative inline-flex items-center cursor-pointer select-none">
                   <input
                     type="checkbox"
@@ -369,7 +407,10 @@ export const WAF: React.FC = () => {
             <div className="border border-nexus-hairline p-3 rounded bg-nexus-panel/50 space-y-3">
               <h4 className="text-xs font-semibold text-nexus-text">Add / Edit Virtual Host</h4>
               <div>
-                <label className="nx-label">Hostname (Domain)</label>
+                <label className="nx-label">
+                  Hostname (Domain)
+                  <HelpTip text="Domain pencocokan di header Host (misal: app.local). Gunakan '*' untuk rute default/catch-all." />
+                </label>
                 <input
                   className="nx-input font-mono"
                   value={newVhostHost}
@@ -511,7 +552,10 @@ export const WAF: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="nx-label">Regex Pattern</label>
+                <label className="nx-label">
+                  Regex Pattern
+                  <HelpTip text="Ekspresi reguler (Regex) pencocokan input URL, query string, request headers, atau body." />
+                </label>
                 <input
                   className="nx-input font-mono text-xs"
                   value={newRulePattern}

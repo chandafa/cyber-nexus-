@@ -8,6 +8,7 @@ Fitur MVP:
 - Virtual host routing and config (multiple sites behind one proxy)
 - Per-host rules configuration & custom rule support
 - Rate limiting per IP (requests per window)
+- HTML block page branded as Cyber Nexus WAF
 """
 import threading
 import http.server
@@ -31,6 +32,130 @@ _DB_PATH = os.path.join(os.path.dirname(__file__), "waf_events.db")
 _IN_MEMORY_LOGS = []
 _LOG_CAPACITY = int(os.environ.get('WAF_LOG_CAPACITY', '5000'))
 _MAX_LOG_MB = 10.0
+
+# HTML template forblocked requests (branded as Cyber Nexus WAF)
+HTML_BLOCK_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Access Forbidden — Cyber Nexus WAF</title>
+    <style>
+        body {{
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f87171;
+            background: linear-gradient(135deg, #ef4444, #b91c1c);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: #ffffff;
+            text-align: center;
+        }}
+        .container {{
+            max-width: 500px;
+            padding: 40px 20px;
+            margin: 20px;
+        }}
+        .icon {{
+            font-size: 80px;
+            margin-bottom: 24px;
+            display: inline-block;
+            animation: pulse 2s infinite ease-in-out;
+        }}
+        h1 {{
+            font-size: 36px;
+            font-weight: 700;
+            margin: 0 0 16px 0;
+            letter-spacing: -0.02em;
+        }}
+        p {{
+            font-size: 16px;
+            opacity: 0.9;
+            margin: 0 0 30px 0;
+            line-height: 1.6;
+        }}
+        .details {{
+            background-color: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            border-radius: 8px;
+            padding: 16px;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 13px;
+            text-align: left;
+            margin-bottom: 30px;
+        }}
+        .details-item {{
+            margin: 8px 0;
+            display: flex;
+            justify-content: space-between;
+        }}
+        .details-label {{
+            opacity: 0.75;
+            font-weight: bold;
+        }}
+        .details-value {{
+            color: #fecaca;
+        }}
+        .footer {{
+            font-size: 13px;
+            opacity: 0.8;
+            margin-top: 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }}
+        .footer svg {{
+            width: 36px;
+            height: 36px;
+            fill: currentColor;
+            opacity: 0.9;
+        }}
+        @keyframes pulse {{
+            0% {{ transform: scale(1); }}
+            50% {{ transform: scale(1.05); }}
+            100% {{ transform: scale(1); }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">⚠️</div>
+        <h1>Access Forbidden</h1>
+        <p>Your request has been blocked by Cyber Nexus WAF security policies.</p>
+        
+        <div class="details">
+            <div class="details-item">
+                <span class="details-label">Triggered Rule:</span>
+                <span class="details-value">{rule}</span>
+            </div>
+            <div class="details-item">
+                <span class="details-label">Client IP:</span>
+                <span class="details-value">{ip}</span>
+            </div>
+            <div class="details-item">
+                <span class="details-label">Path:</span>
+                <span class="details-value">{path}</span>
+            </div>
+            <div class="details-item">
+                <span class="details-label">Timestamp (UTC):</span>
+                <span class="details-value">{ts}</span>
+            </div>
+        </div>
+
+        <div class="footer">
+            <svg viewBox="0 0 24 24">
+                <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 6c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 12c-2.33 0-4.31-1.24-5.4-3.1.03-1.79 3.6-2.77 5.4-2.77 1.79 0 5.37.98 5.4 2.77-1.09 1.86-3.07 3.1-5.4 3.1z"/>
+            </svg>
+            <span>Security Detection Powered By <strong>Cyber Nexus WAF</strong></span>
+        </div>
+    </div>
+</body>
+</html>
+"""
 
 
 def _init_db():
@@ -254,9 +379,10 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
         # Rate Limiting
         if self._rate_limit_exceeded_custom(ip, max_rps):
             self.send_response(429)
-            self.send_header('Content-Type', 'text/plain')
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.end_headers()
-            err_body = 'Rate limit exceeded'
+            ts = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
+            err_body = HTML_BLOCK_TEMPLATE.format(rule='rate_limiting_exceeded', ip=ip, path=decoded_path, ts=ts)
             self.wfile.write(err_body.encode('utf-8'))
             self._log(f"{ip} -> 429 rate limit")
             return
@@ -333,9 +459,11 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 self.send_response(403)
-                self.send_header('Content-Type', 'text/plain')
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
                 self.end_headers()
-                err_body = f'Blocked by WAF rule: {matched}'
+                
+                ts = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
+                err_body = HTML_BLOCK_TEMPLATE.format(rule=matched, ip=ip, path=decoded_path, ts=ts)
                 self.wfile.write(err_body.encode('utf-8'))
                 self._log(f"{ip} -> 403 blocked by {matched}")
             return
