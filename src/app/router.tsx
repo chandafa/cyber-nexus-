@@ -27,6 +27,7 @@ import { WordlistManager } from "../pages/WordlistManager";
 import { Scheduler } from "../pages/Scheduler";
 import { AttackSimulation } from "../pages/AttackSimulation";
 import { DefenseSuite } from "../pages/DefenseSuite";
+import { WAF } from "../pages/WAF";
 
 export const router = createHashRouter([
   { path: "/setup", element: <SetupWizard /> },
@@ -59,6 +60,7 @@ export const router = createHashRouter([
       { path: "scheduler", element: <Scheduler /> },
       { path: "attack-simulation", element: <AttackSimulation /> },
       { path: "defense-suite", element: <DefenseSuite /> },
+      { path: "waf", element: <WAF /> },
     ],
   },
 ]);

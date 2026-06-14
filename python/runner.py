@@ -121,6 +121,28 @@ def dispatch(command: str, kwargs: dict) -> dict:
         from modules import defense_monitor
         return defense_monitor.run(kwargs.get('submode', 'all'))
 
+    if command == 'waf':
+        from modules import waf
+        # args: listen_port, backend, backend_port, max_rps
+        return waf.run(
+            listen_port=kwargs.get('listen_port', '8080'),
+            backend=kwargs.get('backend', '127.0.0.1'),
+            backend_port=kwargs.get('backend_port', '8000'),
+            max_rps=kwargs.get('max_rps', '10'),
+        )
+    if command == 'waf_stop':
+        from modules import waf
+        return waf.stop()
+
+    if command == 'waf_status':
+        from modules import waf
+        return waf.status()
+
+    if command == 'waf_logs':
+        from modules import waf
+        limit = int(kwargs.get('limit', '200'))
+        return waf.get_logs(limit=limit)
+
     # ----------------------------------------------------- modul baru SDD v2
     if command == 'ssl_audit':
         from modules import ssl_auditor
