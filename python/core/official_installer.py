@@ -58,7 +58,7 @@ ISOLATED_PIP = {"prowler"}
 
 # Tool yang realistis hanya tersedia di Linux/WSL (butuh raw socket / kompilasi /
 # driver). Bukan "error" — ditandai opsional & disarankan via WSL di Windows.
-LINUX_ONLY = {"hydra", "arp-scan", "hping3", "suricata", "aircrack-ng"}
+LINUX_ONLY = {"hydra", "arp-scan", "hping3", "suricata", "aircrack-ng", "lynis"}
 
 # Link dokumentasi resmi / cara pasang per tool yang tak bisa otomatis di OS ini.
 DOC_LINKS = {
@@ -67,6 +67,7 @@ DOC_LINKS = {
     "aircrack-ng": "Linux/WSL: apt install aircrack-ng (butuh adapter monitor mode)",
     "hping3": "Linux/WSL: apt install hping3",
     "suricata": "Linux/WSL: apt install suricata · atau MSI Windows: https://suricata.io/download/",
+    "lynis": "Unix/WSL only: git clone https://github.com/CISOfy/lynis.git (bash required)",
     "nc": "Bagian dari Nmap (Ncat) — pasang Nmap, atau Linux/WSL: apt install netcat",
 }
 

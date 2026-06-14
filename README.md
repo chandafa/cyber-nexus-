@@ -128,8 +128,8 @@ Nexus memakai metode **tanpa-admin** lebih dulu, baru package manager:
 
 | OS | Metode |
 |----|--------|
-| **Semua** | Binary resmi GitHub (Nuclei, ffuf, Gobuster, Trivy, httpx, naabu) → `~/.nexus/tools/bin` · pip (sslyze, prowler di venv terisolasi) · git clone (Nikto, searchsploit, Lynis) |
-| **Windows** | **Scoop** (tanpa admin, diutamakan) → **Chocolatey** (UAC). Tool Linux-only (hydra, arp-scan, hping3) ditandai opsional — pakai **WSL** bila diperlukan. |
+| **Semua** | Binary resmi GitHub (Nuclei, ffuf, Gobuster, Trivy, httpx, naabu) → `~/.nexus/tools/bin` · pip (sslyze, prowler di venv terisolasi) · git clone (Nikto, searchsploit). `Lynis` hanya Unix-based / Linux-WSL. |
+| **Windows** | **Scoop** (tanpa admin, diutamakan) → **Chocolatey** (UAC). Tool Linux-only / Unix-only (hydra, arp-scan, hping3, lynis) ditandai opsional — pakai **WSL** bila diperlukan. |
 | **macOS** | **Homebrew** |
 | **Linux** | **apt / dnf / pacman / zypper** (via `pkexec`/`sudo`) |
 
@@ -184,7 +184,7 @@ nexus/
 | `npm run tauri:dev` error WebView | Pasang **WebView2 Runtime** (Microsoft) |
 | Tool terdeteksi "missing" padahal baru di-install | Klik **Periksa** di Settings (PATH dibaca ulang otomatis) |
 | Tool jalan tapi hasil "demo" | Tool gagal runtime (butuh admin/driver/Docker) — fallback demo otomatis; lihat pesan di terminal |
-| Tool Linux-only di Windows (hydra/arp-scan/hping3) | Opsional — pasang via **WSL** (`wsl sudo apt install ...`) |
+| Tool Linux/Unix-only di Windows (hydra/arp-scan/hping3/lynis) | Opsional — pasang via **WSL** (`wsl sudo apt install ...`) |
 
 ---
 
