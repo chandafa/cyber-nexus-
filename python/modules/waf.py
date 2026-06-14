@@ -28,6 +28,7 @@ _SERVER = None
 _THREAD = None
 _DB_PATH = os.path.join(os.path.dirname(__file__), "waf_events.db")
 _IN_MEMORY_LOGS = []
+_LOG_CAPACITY = int(os.environ.get('WAF_LOG_CAPACITY', '5000'))
 
 
 def _init_db():
@@ -174,6 +175,11 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             if resp.content:
                 self.wfile.write(resp.content)
+            try:
+                # log allowed proxied request (include status code)
+                log_event(ip, f'allow:{resp.status_code}', decoded_path, decoded_body, headers_text)
+            except Exception:
+                pass
             self._log(f"{ip} -> {self.command} {self.path} proxied ({resp.status_code})")
         except Exception as e:
             self.send_response(502)
@@ -258,6 +264,39 @@ def run(listen_port: str = '8080', backend: str = '127.0.0.1', backend_port: str
     return {'module': 'waf', 'status': 'running', 'listen_port': lp, 'backend_host': backend, 'backend_port': bp}
 
 
+def run_foreground(listen_port: str = '8080', backend: str = '127.0.0.1', backend_port: str = '8000', max_rps: str = '10') -> dict:
+    """Start WAF and block in the current process (serve_forever).
+
+    Use this when you want the calling process to remain alive (e.g., during dev
+    or when launched directly from a supervisor). Returns after server stops.
+    """
+    lp = int(listen_port)
+    bp = int(backend_port)
+    mr = int(max_rps)
+
+    # initialize and start server (if not already)
+    success = _start_server(lp, backend, bp, mr)
+    if not success:
+        return {'module': 'waf', 'status': 'error', 'error': f'bind_failed:{listen_port}'}
+
+    # If _SERVER exists, call serve_forever in this thread to block.
+    if _SERVER:
+        try:
+            emit_line(f'[WAF] Foreground serving on 0.0.0.0:{lp} -> {backend}:{bp}')
+            _SERVER.serve_forever()
+        except KeyboardInterrupt:
+            emit_line('[WAF] Foreground interrupted, shutting down')
+        except Exception as e:
+            emit_line(f'[WAF] Foreground server error: {e}')
+        finally:
+            try:
+                _SERVER.shutdown()
+                _SERVER.server_close()
+            except Exception:
+                pass
+    return {'module': 'waf', 'status': 'stopped'}
+
+
 def stop() -> dict:
     """Shutdown the running WAF server."""
     global _SERVER, _THREAD
@@ -284,12 +323,25 @@ def log_event(ip: str, rule: str, path: str, payload: str, headers: str):
     ts = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
     rec = {'ts': ts, 'ip': ip, 'rule': rule, 'path': path, 'payload': payload, 'headers': headers}
     _IN_MEMORY_LOGS.append(rec)
+    # enforce in-memory cap
+    if len(_IN_MEMORY_LOGS) > _LOG_CAPACITY:
+        del _IN_MEMORY_LOGS[0: len(_IN_MEMORY_LOGS) - _LOG_CAPACITY]
     try:
         conn = sqlite3.connect(_DB_PATH)
         cur = conn.cursor()
         cur.execute('INSERT INTO events (ts, ip, rule, path, payload, headers) VALUES (?, ?, ?, ?, ?, ?)',
                     (ts, ip, rule, path, payload, headers))
         conn.commit()
+        # enforce DB capacity: delete oldest rows if over capacity
+        try:
+            cur.execute('SELECT COUNT(1) FROM events')
+            cnt = cur.fetchone()[0]
+            if cnt > _LOG_CAPACITY:
+                to_delete = cnt - _LOG_CAPACITY
+                cur.execute('DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id ASC LIMIT ?)', (to_delete,))
+                conn.commit()
+        except Exception:
+            pass
         conn.close()
     except Exception as e:
         emit_line(f"[WAF] log insert error: {e}")

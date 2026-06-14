@@ -124,6 +124,14 @@ def dispatch(command: str, kwargs: dict) -> dict:
     if command == 'waf':
         from modules import waf
         # args: listen_port, backend, backend_port, max_rps
+        fg = str(kwargs.get('foreground', '')).lower() in ('1', 'true', 'yes')
+        if fg:
+            return waf.run_foreground(
+                listen_port=kwargs.get('listen_port', '8080'),
+                backend=kwargs.get('backend', '127.0.0.1'),
+                backend_port=kwargs.get('backend_port', '8000'),
+                max_rps=kwargs.get('max_rps', '10'),
+            )
         return waf.run(
             listen_port=kwargs.get('listen_port', '8080'),
             backend=kwargs.get('backend', '127.0.0.1'),
