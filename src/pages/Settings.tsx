@@ -24,21 +24,35 @@ const FIELDS: Field[] = [
   { key: "auto_save_pcap", label: "Auto-save PCAP", type: "select", options: ["true", "false"] },
 ];
 
+// Tool yang realistis hanya jalan di Linux/WSL (selaras dengan backend LINUX_ONLY).
+const LINUX_ONLY = ["hydra", "arp-scan", "hping3", "suricata", "aircrack-ng"];
+const BACKEND_LABEL: Record<string, string> = {
+  auto: "Auto (native Windows; WSL bila perlu)",
+  windows: "Selalu Windows native",
+  wsl: "Utamakan WSL",
+};
+
 export const Settings: React.FC = () => {
-  const { settings, loadSettings, update, deps, refreshDeps, loading, install, missingAny } =
-    useSettingsStore();
+  const {
+    settings, loadSettings, update, deps, refreshDeps, loading, install, missingAny,
+    wsl, wslLoading, refreshWsl, chooseBackend, provisionWsl, setRealMode,
+  } = useSettingsStore();
   const installRunning = useScanRuntimeStore((s) => s.scans["install"]?.running ?? false);
   const [draft, setDraft] = useState<Record<string, string>>({});
 
   useEffect(() => {
     loadSettings();
     refreshDeps();
-  }, [loadSettings, refreshDeps]);
+    refreshWsl();
+  }, [loadSettings, refreshDeps, refreshWsl]);
 
   useEffect(() => setDraft(settings), [settings]);
 
   const missing = missingAny();
   const handleInstall = (tools: string[]) => install(tools);
+
+  // Tool Linux-only yang belum tersedia (native maupun via WSL).
+  const linuxMissing = LINUX_ONLY.filter((t) => deps[t] && !deps[t].installed);
 
   return (
     <div className="mx-auto max-w-5xl animate-fade-in p-6">
@@ -152,6 +166,134 @@ export const Settings: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Backend Eksekusi (WSL) — untuk tool yang hanya jalan di Linux */}
+      {wsl?.is_windows && (
+        <div className="nx-card mt-5">
+          <div className="mb-1 flex items-center justify-between">
+            <h2 className="nx-section">Backend Eksekusi (Tool Linux via WSL)</h2>
+            <button
+              className="nx-btn-ghost px-2.5 py-1 text-[11px]"
+              onClick={refreshWsl}
+              disabled={wslLoading}
+            >
+              <Ic.refresh className={`h-3.5 w-3.5 ${wslLoading ? "animate-spin" : ""}`} /> Periksa
+            </button>
+          </div>
+          <p className="mb-4 text-xs text-nexus-muted">
+            Beberapa tool ({LINUX_ONLY.join(", ")}) hanya berjalan di Linux. Nexus dapat
+            menjalankannya otomatis lewat <b>WSL</b> di komputer ini — tanpa perlu Anda atur manual.
+          </p>
+
+          {/* Status WSL */}
+          <div
+            className={`mb-4 flex items-center gap-3 border px-3 py-2.5 ${
+              wsl.available
+                ? "border-nexus-green/40 bg-nexus-green/10"
+                : "border-severity-medium/40 bg-severity-medium/10"
+            }`}
+          >
+            <span
+              className={`h-2 w-2 shrink-0 rounded-full ${
+                wsl.available ? "bg-nexus-green" : "bg-severity-medium"
+              }`}
+            />
+            <div className="min-w-0 flex-1 text-xs">
+              {wsl.available ? (
+                <span className="text-nexus-green">
+                  WSL aktif — distro: <b>{wsl.active_distro}</b>
+                  {wsl.distros.length > 1 ? ` (+${wsl.distros.length - 1} lainnya)` : ""}
+                </span>
+              ) : (
+                <span className="text-yellow-200">
+                  WSL belum aktif. Klik tombol di bawah untuk memasang & mengonfigurasinya otomatis
+                  (akan muncul prompt Administrator).
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {/* Mode backend */}
+            <div>
+              <label className="nx-label">Mode Eksekusi</label>
+              <Select
+                value={wsl.backend}
+                onChange={(v) => chooseBackend(v as any, wsl.active_distro)}
+                options={(["auto", "windows", "wsl"] as const).map((v) => ({
+                  value: v,
+                  label: BACKEND_LABEL[v],
+                }))}
+              />
+            </div>
+            {/* Pilih distro bila ada >1 */}
+            {wsl.distros.length > 0 && (
+              <div>
+                <label className="nx-label">Distro WSL ("Linux lain")</label>
+                <Select
+                  value={wsl.active_distro}
+                  onChange={(v) => chooseBackend(wsl.backend, v)}
+                  options={wsl.distros}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            {!wsl.available ? (
+              <button
+                className="nx-btn-primary"
+                onClick={() => provisionWsl(linuxMissing)}
+                disabled={installRunning}
+              >
+                {installRunning ? (
+                  <Ic.refresh className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Ic.install className="h-4 w-4" />
+                )}
+                Aktifkan WSL otomatis (1 klik)
+              </button>
+            ) : (
+              <button
+                className="nx-btn-primary"
+                onClick={() => provisionWsl(linuxMissing)}
+                disabled={installRunning || linuxMissing.length === 0}
+              >
+                {installRunning ? (
+                  <Ic.refresh className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Ic.install className="h-4 w-4" />
+                )}
+                {linuxMissing.length === 0
+                  ? "Semua tool Linux sudah siap"
+                  : `Pasang tool Linux ke WSL (${linuxMissing.length})`}
+              </button>
+            )}
+          </div>
+          <p className="mt-3 text-[11px] text-nexus-muted">
+            Jika WSL baru pertama dipasang, Windows mungkin meminta <b>restart</b>. Setelah restart,
+            buka Nexus lagi dan klik tombol ini sekali lagi untuk menyelesaikan setup.
+          </p>
+
+          {/* Mode eksekusi nyata (matikan demo) */}
+          <label className="mt-4 flex cursor-pointer items-start gap-3 border-t border-nexus-hairline pt-4">
+            <input
+              type="checkbox"
+              className="mt-0.5 accent-nexus-accent"
+              checked={wsl.no_demo}
+              onChange={(e) => setRealMode(e.target.checked)}
+            />
+            <span className="text-xs">
+              <span className="font-semibold text-nexus-text">Mode Eksekusi Nyata (matikan demo)</span>
+              <span className="mt-0.5 block text-nexus-muted">
+                Tool dijalankan sungguhan; bila gagal, tampilkan <b>error nyata</b> — bukan data
+                demo. Tool privileged (nmap -sS/-O, arp-scan, suricata, hping3) dijalankan sebagai
+                root di WSL. Aktifkan saat mengetes infrastruktur nyata.
+              </span>
+            </span>
+          </label>
+        </div>
+      )}
     </div>
   );
 };

@@ -9,11 +9,18 @@ import { isTauri } from "../lib/tauri";
 
 export const Layout: React.FC = () => {
   const navigate = useNavigate();
-  const { loadSettings, loaded, onboardingComplete } = useSettingsStore();
+  const { loadSettings, loaded, onboardingComplete, refreshWsl, refreshDeps } =
+    useSettingsStore();
 
   useEffect(() => {
     loadSettings();
-  }, [loadSettings]);
+    // Saat aplikasi dibuka: nyalakan WSL lebih awal & deteksi tool terpasang
+    // (termasuk yang tersedia via WSL) secara otomatis.
+    if (isTauri()) {
+      refreshWsl();
+      refreshDeps();
+    }
+  }, [loadSettings, refreshWsl, refreshDeps]);
 
   useEffect(() => {
     if (loaded && isTauri() && !onboardingComplete()) {

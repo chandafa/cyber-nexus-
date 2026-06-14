@@ -22,27 +22,30 @@ class VulnScanner:
             cb('[DEMO] nikto tidak terpasang — output demo.')
             return self._demo_nikto(target, cb)
 
-        out = os.path.join(tempfile.gettempdir(), 'nikto_out.json')
-        cmd = ['nikto', '-h', target, '-Format', 'json', '-output', out, '-nointeractive']
+        # Parse STDOUT langsung (andal lintas-versi & tak butuh modul Perl JSON,
+        # yang sering bikin "Invalid output format").
+        cmd = ['nikto', '-h', target, '-nointeractive', '-maxtime', '120s']
         cb(f'$ {" ".join(cmd)}')
-        self._stream(cmd, cb)
-        try:
-            with open(out, encoding='utf-8', errors='replace') as f:
-                data = json.load(f)
-            return self._normalize_nikto(data.get('vulnerabilities', []))
-        except Exception:
-            cb('[!] nikto tidak menghasilkan output (gagal/Perl) — mode demo.')
-            return self._demo_nikto(target, cb)
+        lines = self._stream(cmd, cb)
+        return self._parse_nikto_stdout(lines, target)
 
-    def _normalize_nikto(self, vulns: list) -> List[dict]:
+    def _parse_nikto_stdout(self, lines: List[str], target: str) -> List[dict]:
+        skip_starts = ('Target IP', 'Target Hostname', 'Target Port', 'Start Time',
+                       'End Time', 'Scan terminated', 'Nikto v', 'No web server',
+                       'SSL Info', 'ERROR', 'No CGI', 'Root page')
+        skip_contains = ('host(s) tested', 'requested by the host')
         out = []
-        for v in vulns:
-            out.append({
-                'tool': 'nikto', 'severity': 'medium',
-                'vuln_id': v.get('id', ''), 'title': v.get('msg', ''),
-                'description': v.get('msg', ''), 'url': v.get('url', ''),
-                'remediation': '',
-            })
+        for s in lines:
+            t = s.strip()
+            if not t.startswith('+'):
+                continue
+            body = t[1:].strip()
+            if (not body or any(body.startswith(x) for x in skip_starts)
+                    or any(x in body for x in skip_contains)):
+                continue
+            out.append({'tool': 'nikto', 'severity': 'medium', 'vuln_id': '',
+                        'title': body[:200], 'description': body, 'url': target,
+                        'remediation': ''})
         return out
 
     # -------------------------------------------------------------- gobuster
@@ -53,16 +56,12 @@ class VulnScanner:
             cb('[DEMO] gobuster tidak terpasang — output demo.')
             return self._demo_gobuster(target, cb)
 
-        out = os.path.join(tempfile.gettempdir(), 'gobuster_out.txt')
-        cmd = ['gobuster', mode, '-u', target, '-w', wordlist, '-o', out, '--no-color']
+        cmd = ['gobuster', mode, '-u', target, '-w', wordlist, '-q', '--no-color']
         cb(f'$ {" ".join(cmd)}')
-        self._stream(cmd, cb)
-        try:
-            with open(out, encoding='utf-8', errors='replace') as f:
-                return [l.strip() for l in f if l.strip()]
-        except Exception:
-            cb('[!] gobuster tidak menghasilkan output — mode demo.')
-            return self._demo_gobuster(target, cb)
+        lines = self._stream(cmd, cb)
+        # gobuster -q mencetak temuan: "admin  (Status: 301) [Size: ..]" → ambil
+        # baris yang memuat "(Status:" (rapikan spasi ganda).
+        return [' '.join(l.split()) for l in lines if '(Status:' in l]
 
     # ----------------------------------------------------------------- nuclei
     def run_nuclei(self, target: str, output_callback: Optional[Callable] = None) -> List[dict]:
@@ -71,43 +70,49 @@ class VulnScanner:
             cb('[DEMO] nuclei tidak terpasang — output demo.')
             return self._demo_nuclei(target, cb)
 
-        out = os.path.join(tempfile.gettempdir(), 'nuclei_out.json')
-        cmd = ['nuclei', '-u', target, '-jsonl', '-o', out, '-silent',
+        # -jsonl ke STDOUT (tanpa file) — parse tiap baris JSON.
+        cmd = ['nuclei', '-u', target, '-jsonl', '-silent',
                '-severity', 'low,medium,high,critical']
         cb(f'$ {" ".join(cmd)}')
-        self._stream(cmd, cb)
+        lines = self._stream(cmd, cb)
         results = []
-        try:
-            with open(out, encoding='utf-8', errors='replace') as f:
-                for line in f:
-                    if line.strip():
-                        j = json.loads(line)
-                        info = j.get('info', {})
-                        results.append({
-                            'tool': 'nuclei',
-                            'severity': info.get('severity', 'info'),
-                            'vuln_id': j.get('template-id', ''),
-                            'title': info.get('name', ''),
-                            'description': info.get('description', ''),
-                            'url': j.get('matched-at', target),
-                            'remediation': (info.get('remediation', '') or ''),
-                        })
-        except Exception:
-            pass
+        for line in lines:
+            line = line.strip()
+            if not (line.startswith('{') and line.endswith('}')):
+                continue
+            try:
+                j = json.loads(line)
+            except Exception:
+                continue
+            info = j.get('info', {})
+            results.append({
+                'tool': 'nuclei',
+                'severity': info.get('severity', 'info'),
+                'vuln_id': j.get('template-id', ''),
+                'title': info.get('name', ''),
+                'description': info.get('description', ''),
+                'url': j.get('matched-at', target),
+                'remediation': (info.get('remediation', '') or ''),
+            })
         return results
 
     # -------------------------------------------------------------- helpers
-    def _stream(self, cmd, cb):
+    def _stream(self, cmd, cb) -> List[str]:
+        """Jalankan tool (via routing WSL), stream + KUMPULKAN baris stdout."""
         cmd = fix_tool_cmd(cmd)
+        collected: List[str] = []
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1)
             assert proc.stdout is not None
             for line in proc.stdout:
-                cb(line.rstrip('\n'))
+                s = line.rstrip('\n')
+                collected.append(s)
+                cb(s)
             proc.wait()
         except Exception as e:
             cb(f'[ERROR] {e}')
+        return collected
 
     # ----------------------------------------------------------------- demo
     def _demo_nikto(self, target, cb) -> List[dict]:

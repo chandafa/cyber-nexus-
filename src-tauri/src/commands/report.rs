@@ -20,14 +20,22 @@ pub fn write_text_file(path: String, content: String) -> Result<(), String> {
 #[tauri::command]
 pub fn open_path(path: String) -> Result<(), String> {
     use std::process::Command;
-    let res = if cfg!(target_os = "windows") {
-        Command::new("cmd").args(["/C", "start", "", &path]).spawn()
+    use super::executor::hide_window;
+    let mut cmd = if cfg!(target_os = "windows") {
+        let mut c = Command::new("cmd");
+        c.args(["/C", "start", "", &path]);
+        c
     } else if cfg!(target_os = "macos") {
-        Command::new("open").arg(&path).spawn()
+        let mut c = Command::new("open");
+        c.arg(&path);
+        c
     } else {
-        Command::new("xdg-open").arg(&path).spawn()
+        let mut c = Command::new("xdg-open");
+        c.arg(&path);
+        c
     };
-    res.map(|_| ()).map_err(|e| e.to_string())
+    hide_window(&mut cmd);
+    cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// Buka folder yang memuat sebuah file.

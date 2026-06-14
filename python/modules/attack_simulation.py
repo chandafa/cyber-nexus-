@@ -4,7 +4,7 @@ Setiap simulasi WAJIB lolos Scope Guard (target authorized) sebelum jalan."""
 from typing import Callable, Optional
 
 from core.scope_guard import ScopeGuard, ScopeError
-from core.subprocess_runner import tool_available, simulate_stream
+from core.subprocess_runner import tool_available, simulate_stream, tool_argv, run_streaming
 from core.stream_handler import emit_line
 
 SIMULATIONS = {
@@ -63,13 +63,64 @@ def _demo_run(sim_key: str, target: str, cb: Callable):
     simulate_stream(lines, cb, delay=0.1)
 
 
+def _real_cmd(sim_key: str, target: str, kwargs: dict):
+    """Bangun perintah NYATA per simulasi. Kembalikan list argumen atau None."""
+    if sim_key == 'brute_force':
+        service = kwargs.get('service', 'ssh')
+        passlist = kwargs.get('passlist') or kwargs.get('wordlist') or 'wordlists/rockyou.txt'
+        user = kwargs.get('username', '')
+        userlist = kwargs.get('userlist', '')
+        cmd = ['hydra']
+        if user:
+            cmd += ['-l', user]
+        elif userlist:
+            cmd += ['-L', userlist]
+        else:
+            cmd += ['-l', 'admin']
+        cmd += ['-P', passlist, '-t', str(kwargs.get('threads', '4')), f'{service}://{target}']
+        return cmd
+    if sim_key == 'dir_fuzzing':
+        wl = kwargs.get('wordlist', 'wordlists/common_dirs.txt')
+        url = target if str(target).startswith('http') else f'http://{target}'
+        return ['ffuf', '-u', f'{url}/FUZZ', '-w', wl,
+                '-mc', '200,204,301,302,307,401,403']
+    if sim_key == 'dos_lab':
+        # Lab: SYN terbatas (bukan --flood tak terbatas) — aman & terukur.
+        port = str(kwargs.get('port', '80'))
+        count = str(kwargs.get('count', '2000'))
+        return ['hping3', '-S', '-p', port, '-i', 'u1000', '-c', count, target]
+    if sim_key == 'mitm_demo':
+        return ['arpspoof', '-i', kwargs.get('interface', 'eth0'), target]
+    if sim_key == 'privesc_check':
+        return ['linpeas']
+    return None
+
+
+def _real_run(sim_key: str, target: str, cb: Callable, kwargs: dict) -> int:
+    """Jalankan tool NYATA bila tersedia; kalau tidak, fallback demo
+    (yang akan mengangkat error bila mode eksekusi-nyata aktif)."""
+    sim = SIMULATIONS[sim_key]
+    tool = sim['tool']
+    if not tool_available(tool):
+        cb(f'[!] Tool "{tool}" tidak tersedia (pasang via Settings / WSL).')
+        _demo_run(sim_key, target, cb)  # raise DemoDisabled bila NEXUS_NO_DEMO
+        return 0
+    cmd = _real_cmd(sim_key, target, kwargs)
+    if not cmd:
+        _demo_run(sim_key, target, cb)
+        return 0
+    argv = tool_argv(cmd[0], cmd[1:])
+    cb(f'$ {" ".join(cmd)}')
+    return run_streaming(argv, cb, timeout=int(kwargs.get('timeout', 180)))
+
+
 def run(simulation: str = '', target: str = '', confirmed: str = 'false', **kwargs) -> dict:
     cb = emit_line
     if simulation not in SIMULATIONS:
         return {'module': 'attack_sim', 'error': f'Simulasi tidak dikenal: {simulation}',
                 'available': SIMULATIONS}
 
-    # Scope Guard — wajib.
+    # Scope Guard — wajib (otorisasi target, BUKAN pembatasan read-only).
     guard = ScopeGuard()
     try:
         guard.require_authorization(target)
@@ -83,12 +134,11 @@ def run(simulation: str = '', target: str = '', confirmed: str = 'false', **kwar
                 'blocked': True, 'reason': 'Konfirmasi eksekusi diperlukan.'}
 
     sim = SIMULATIONS[simulation]
-    cb(f'[SCOPE OK] Target {target} terotorisasi. Menjalankan {sim["label"]}...')
-    # Selalu jalankan versi demo/edukatif (aman) — real tooling hanya untuk lab lanjutan.
-    _demo_run(simulation, target, cb)
+    cb(f'[SCOPE OK] Target {target} terotorisasi. Menjalankan {sim["label"]} (NYATA)...')
+    rc = _real_run(simulation, target, cb, kwargs)
     return {'module': 'attack_sim', 'simulation': simulation, 'label': sim['label'],
             'target': target, 'goal': sim['goal'], 'completed': True,
-            'tool_present': tool_available(sim['tool'])}
+            'exit_code': rc, 'tool_present': tool_available(sim['tool'])}
 
 
 def catalog() -> dict:

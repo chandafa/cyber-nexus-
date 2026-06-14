@@ -140,6 +140,30 @@ export async function runToolJson<T = any>(command: string, args: string[] = [])
   return invoke<T>("run_tool_json", { command, args });
 }
 
+// --------------------------------------------------------------- backend WSL
+export type Backend = "auto" | "windows" | "wsl";
+export interface WslStatus {
+  is_windows: boolean;
+  available: boolean;
+  distros: string[];
+  active_distro: string;
+  backend: Backend;
+  no_demo: boolean;
+  wsl_user: string;
+}
+/** Status WSL: terdeteksi atau tidak, daftar distro, backend aktif. */
+export async function wslStatus(): Promise<WslStatus> {
+  return runToolJson<WslStatus>("wsl_status");
+}
+/** Simpan preferensi backend eksekusi (auto/windows/wsl) + distro pilihan. */
+export async function setBackend(backend: Backend, distro = "") {
+  return runToolJson("set_backend", ["--backend", backend, ...(distro ? ["--distro", distro] : [])]);
+}
+/** Aktif/nonaktifkan mode eksekusi nyata (matikan fallback demo). */
+export async function setRealMode(noDemo: boolean) {
+  return runToolJson("set_backend", ["--no_demo", noDemo ? "true" : "false"]);
+}
+
 // ------------------------------------------------------------------ database
 
 export async function listSessions(limit = 100): Promise<ScanSession[]> {

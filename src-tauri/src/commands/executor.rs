@@ -42,15 +42,24 @@ pub fn python_exe() -> String {
     }
 }
 
+/// Sembunyikan jendela console subprocess (CREATE_NO_WINDOW) di Windows agar
+/// tidak ada kedipan PowerShell/terminal saat memanggil python/where/dll.
+/// No-op di OS lain.
+#[cfg(windows)]
+pub(crate) fn hide_window(cmd: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    cmd.creation_flags(CREATE_NO_WINDOW);
+}
+#[cfg(not(windows))]
+pub(crate) fn hide_window(_cmd: &mut Command) {}
+
 fn which(cmd: &str) -> bool {
     let probe = if cfg!(windows) { "where" } else { "which" };
-    Command::new(probe)
-        .arg(cmd)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    let mut c = Command::new(probe);
+    c.arg(cmd).stdout(Stdio::null()).stderr(Stdio::null());
+    hide_window(&mut c);
+    c.status().map(|s| s.success()).unwrap_or(false)
 }
 
 /// Temukan path runner.py dan project root (folder yang berisi `python/`).
@@ -80,9 +89,19 @@ pub fn resolve_runner(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
     }
 
     for root in roots {
-        let runner = root.join("python").join("runner.py");
-        if runner.exists() {
-            return Ok((runner, root));
+        // Saat di-bundle Tauri, resource yang direferensikan dengan `../python`
+        // ditaruh di bawah folder `_up_` (Tauri mengganti `..` -> `_up_`).
+        // Jadi cek kedua layout: source tree (`python/`) dan bundle (`_up_/python/`).
+        for prefix in ["", "_up_"] {
+            let base = if prefix.is_empty() {
+                root.clone()
+            } else {
+                root.join(prefix)
+            };
+            let runner = base.join("python").join("runner.py");
+            if runner.exists() {
+                return Ok((runner, base));
+            }
         }
     }
     Err("runner.py tidak ditemukan (set env NEXUS_PROJECT_ROOT ke folder proyek)".into())
@@ -103,6 +122,7 @@ pub fn run_python_blocking(
         .current_dir(&root)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    hide_window(&mut cmd);
 
     let output = cmd.output().map_err(|e| e.to_string())?;
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -141,14 +161,17 @@ pub async fn run_scan(
     // Kita perlu akses Db di thread; State tidak Send. Ambil pointer via app state.
     let app_for_thread = app.clone();
 
-    let mut child = Command::new(python_exe())
+    let mut spawn_cmd = Command::new(python_exe());
+    spawn_cmd
         .arg("-u")
         .arg(&runner)
         .arg(&command)
         .args(&args)
         .current_dir(&root)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    hide_window(&mut spawn_cmd);
+    let mut child = spawn_cmd
         .spawn()
         .map_err(|e| format!("Gagal spawn python: {e}"))?;
 
