@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Build output
+dist/
+src-tauri/target/
+
+# Runtime data
+*.db
+*.db-journal
+reports/*.pdf
+captures/*.pcap
+/tmp/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Wordlists (large) — keep samples only
+wordlists/rockyou_full.txt
+
+# Build/run logs
+*.log
+build.exit

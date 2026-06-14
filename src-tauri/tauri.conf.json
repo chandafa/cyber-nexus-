@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Nexus",
+  "version": "1.0.0",
+  "identifier": "com.nexus.security-agent",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Nexus — AI Security Agent",
+        "width": 1360,
+        "height": 860,
+        "minWidth": 1024,
+        "minHeight": 680,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true,
+        "theme": "Dark"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [
+      "../python/**/*",
+      "../wordlists/**/*"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "Antarmuka terpadu tools keamanan jaringan",
+    "longDescription": "Nexus mengintegrasikan berbagai tools keamanan jaringan (Nmap, tshark, Nikto, Gobuster, Hydra, Hashcat, dll) dalam satu antarmuka desktop untuk pembelajaran ethical hacking dan penetration testing."
+  },
+  "plugins": {}
+}

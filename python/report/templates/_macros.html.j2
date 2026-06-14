@@ -1,0 +1,42 @@
+{% macro summary_cards(summary) %}
+<div class="cards">
+  <div class="card"><div class="num" style="color:#ff3b5c">{{ summary.critical }}</div>Critical</div>
+  <div class="card"><div class="num" style="color:#ff7849">{{ summary.high }}</div>High</div>
+  <div class="card"><div class="num" style="color:#ffb020">{{ summary.medium }}</div>Medium</div>
+  <div class="card"><div class="num" style="color:#3b82f6">{{ summary.low }}</div>Low</div>
+  <div class="card"><div class="num" style="color:#6b7280">{{ summary.info }}</div>Info</div>
+</div>
+{% endmacro %}
+
+{% macro vuln_table(vulns) %}
+<table>
+  <thead><tr><th>Severity</th><th>ID</th><th>Judul</th><th>URL</th><th>Remediation</th></tr></thead>
+  <tbody>
+  {% for v in vulns %}
+    <tr>
+      <td><span class="badge {{ v.severity }}">{{ v.severity | upper }}</span></td>
+      <td>{{ v.vuln_id }}</td>
+      <td>{{ v.title }}</td>
+      <td>{{ v.url }}</td>
+      <td>{{ v.remediation }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5">Tidak ada kerentanan ditemukan.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
+
+{% macro port_table(ports) %}
+<table>
+  <thead><tr><th>Port</th><th>Protocol</th><th>State</th><th>Service</th><th>Version</th></tr></thead>
+  <tbody>
+  {% for p in ports %}
+    <tr><td>{{ p.port }}</td><td>{{ p.protocol }}</td><td>{{ p.state }}</td>
+        <td>{{ p.service }}</td><td>{{ p.version }}</td></tr>
+  {% else %}
+    <tr><td colspan="5">Tidak ada port terbuka.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endmacro %}

@@ -1,0 +1,52 @@
+{% extends "_base.html.j2" %}
+{% import "_macros.html.j2" as m %}
+{% block content %}
+  <h2>Ringkasan Eksekutif</h2>
+  <p>
+    Penilaian keamanan terhadap <strong>{{ session.target }}</strong> menemukan
+    <strong>{{ summary.total_vulns }}</strong> kerentanan
+    ({{ summary.critical }} kritis, {{ summary.high }} tinggi) dan
+    <strong>{{ summary.total_ports }}</strong> port terbuka.
+  </p>
+  {{ m.summary_cards(summary) }}
+
+  {% if session.ports %}
+  <h2>1. Port Scan</h2>
+  <p>Host: {{ session.hostname | default('-') }} — OS: {{ session.os_guess | default('Unknown') }}</p>
+  {{ m.port_table(session.ports) }}
+  {% endif %}
+
+  {% if session.vulnerabilities %}
+  <h2>2. Kerentanan</h2>
+  {{ m.vuln_table(session.vulnerabilities) }}
+  {% endif %}
+
+  {% if session.directories %}
+  <h2>3. Enumerasi Direktori</h2>
+  <table><thead><tr><th>Path</th></tr></thead><tbody>
+  {% for d in session.directories %}<tr><td>{{ d }}</td></tr>{% endfor %}
+  </tbody></table>
+  {% endif %}
+
+  {% if session.anomalies %}
+  <h2>4. Analisis Log</h2>
+  <table><thead><tr><th>Severity</th><th>Tipe</th><th>Source IP</th><th>Detail</th></tr></thead><tbody>
+  {% for a in session.anomalies %}
+    <tr><td><span class="badge {{ a.severity }}">{{ a.severity | upper }}</span></td>
+        <td>{{ a.attack_type }}</td><td>{{ a.source_ip }}</td><td>{{ a.raw_line }}</td></tr>
+  {% endfor %}
+  </tbody></table>
+  {% endif %}
+
+  <h2>Appendix — Rekomendasi</h2>
+  <ul>
+    <li>Prioritaskan remediasi temuan kritis &amp; tinggi.</li>
+    <li>Nonaktifkan layanan tidak terpakai dan terapkan firewall least-privilege.</li>
+    <li>Lakukan hardening dan pengujian ulang berkala.</li>
+  </ul>
+
+  {% if session.raw_output %}
+  <h2>Appendix — Raw Output</h2>
+  <pre>{{ session.raw_output }}</pre>
+  {% endif %}
+{% endblock %}

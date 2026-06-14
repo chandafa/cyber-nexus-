@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>{{ title }}</title>
+<style>
+  @page { size: A4; margin: 2cm; @bottom-center { content: "Nexus Security Report — Halaman " counter(page) " / " counter(pages); font-size: 9px; color: #888; } }
+  * { box-sizing: border-box; }
+  body { font-family: "Helvetica Neue", Arial, sans-serif; color: #1a1a2e; font-size: 12px; line-height: 1.5; }
+  h1 { color: #4c1d95; font-size: 26px; margin-bottom: 4px; }
+  h2 { color: #5b21b6; font-size: 17px; border-bottom: 2px solid #ddd6fe; padding-bottom: 4px; margin-top: 28px; }
+  h3 { color: #6d28d9; font-size: 14px; margin-top: 18px; }
+  .cover { border-left: 6px solid #7c5cff; padding: 16px 20px; background: #f5f3ff; border-radius: 6px; margin-bottom: 24px; }
+  .meta { color: #555; font-size: 11px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+  th { background: #ede9fe; text-align: left; padding: 7px 9px; font-size: 11px; color: #4c1d95; }
+  td { padding: 6px 9px; border-bottom: 1px solid #eee; font-size: 11px; vertical-align: top; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; color: #fff; font-size: 10px; font-weight: 600; }
+  .critical { background: #ff3b5c; } .high { background: #ff7849; } .medium { background: #ffb020; color:#3a2a00;}
+  .low { background: #3b82f6; } .info { background: #6b7280; }
+  .cards { display: flex; gap: 10px; margin: 16px 0; }
+  .card { flex: 1; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; text-align: center; }
+  .card .num { font-size: 26px; font-weight: 700; }
+  .disclaimer { margin-top: 30px; padding: 12px; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 6px; font-size: 10px; color: #9a3412; }
+  pre { background: #0d0d1a; color: #a8d8a8; padding: 12px; border-radius: 6px; font-size: 10px; white-space: pre-wrap; word-break: break-word; }
+</style>
+</head>
+<body>
+  <div class="cover">
+    <h1>{{ title }}</h1>
+    <div class="meta">
+      Dihasilkan: {{ generated_at }}<br>
+      Modul: {{ session.module | default('-') }} &nbsp;|&nbsp;
+      Target: {{ session.target | default('-') }} &nbsp;|&nbsp;
+      Tipe Laporan: {{ report_type | capitalize }}
+    </div>
+  </div>
+
+  {% block content %}{% endblock %}
+
+  <div class="disclaimer">
+    <strong>Penggunaan Etis —</strong> Laporan ini dihasilkan oleh Nexus untuk tujuan
+    pembelajaran ethical hacking dan penetration testing dengan izin. Penggunaan terhadap
+    sistem tanpa otorisasi adalah ilegal. Pengguna bertanggung jawab penuh atas aktivitasnya.
+  </div>
+</body>
+</html>

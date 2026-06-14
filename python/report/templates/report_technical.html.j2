@@ -1,0 +1,41 @@
+{% extends "_base.html.j2" %}
+{% import "_macros.html.j2" as m %}
+{% block content %}
+  <h2>Detail Teknis</h2>
+  <p>Informasi sesi: modul <strong>{{ session.module }}</strong>,
+     mode <strong>{{ session.mode | default('-') }}</strong>,
+     status <strong>{{ session.status | default('completed') }}</strong>.</p>
+
+  {% if session.ports %}
+  <h3>Port Terbuka & Layanan</h3>
+  <p>Host: {{ session.hostname | default('-') }} — OS: {{ session.os_guess | default('Unknown') }}</p>
+  {{ m.port_table(session.ports) }}
+  {% endif %}
+
+  {% if session.vulnerabilities %}
+  <h3>Kerentanan ({{ summary.total_vulns }})</h3>
+  {{ m.vuln_table(session.vulnerabilities) }}
+  {% endif %}
+
+  {% if session.directories %}
+  <h3>Direktori/Endpoint Ditemukan</h3>
+  <table><thead><tr><th>Path</th></tr></thead><tbody>
+  {% for d in session.directories %}<tr><td>{{ d }}</td></tr>{% endfor %}
+  </tbody></table>
+  {% endif %}
+
+  {% if session.anomalies %}
+  <h3>Anomali Log Terdeteksi</h3>
+  <table><thead><tr><th>Severity</th><th>Tipe</th><th>Source IP</th><th>Detail</th></tr></thead><tbody>
+  {% for a in session.anomalies %}
+    <tr><td><span class="badge {{ a.severity }}">{{ a.severity | upper }}</span></td>
+        <td>{{ a.attack_type }}</td><td>{{ a.source_ip }}</td><td>{{ a.raw_line }}</td></tr>
+  {% endfor %}
+  </tbody></table>
+  {% endif %}
+
+  {% if session.raw_output %}
+  <h3>Raw Output</h3>
+  <pre>{{ session.raw_output }}</pre>
+  {% endif %}
+{% endblock %}

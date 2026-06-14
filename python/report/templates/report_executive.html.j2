@@ -1,0 +1,31 @@
+{% extends "_base.html.j2" %}
+{% import "_macros.html.j2" as m %}
+{% block content %}
+  <h2>Ringkasan Eksekutif</h2>
+  <p>
+    Penilaian keamanan dilakukan terhadap target <strong>{{ session.target }}</strong>.
+    Total <strong>{{ summary.total_vulns }}</strong> temuan kerentanan teridentifikasi,
+    dengan <strong>{{ summary.critical }}</strong> kritis dan <strong>{{ summary.high }}</strong>
+    berisiko tinggi yang memerlukan perhatian segera.
+  </p>
+  {{ m.summary_cards(summary) }}
+
+  <h3>Tingkat Risiko Keseluruhan</h3>
+  {% if summary.critical > 0 %}
+    <p><span class="badge critical">KRITIS</span> Terdapat kerentanan kritis yang dapat dieksploitasi secara langsung. Tindakan perbaikan segera diwajibkan.</p>
+  {% elif summary.high > 0 %}
+    <p><span class="badge high">TINGGI</span> Beberapa kerentanan berisiko tinggi ditemukan. Disarankan perbaikan dalam waktu dekat.</p>
+  {% elif summary.total_vulns > 0 %}
+    <p><span class="badge medium">SEDANG</span> Ditemukan kerentanan tingkat menengah/rendah. Perbaiki sesuai prioritas.</p>
+  {% else %}
+    <p><span class="badge low">RENDAH</span> Tidak ada kerentanan signifikan terdeteksi pada cakupan pengujian ini.</p>
+  {% endif %}
+
+  <h3>Rekomendasi Tingkat Tinggi</h3>
+  <ul>
+    <li>Terapkan patch keamanan untuk seluruh temuan kritis dan tinggi.</li>
+    <li>Tutup port/layanan yang tidak diperlukan ({{ summary.total_ports }} port terbuka terdeteksi).</li>
+    <li>Terapkan hardening konfigurasi sesuai praktik terbaik.</li>
+    <li>Lakukan pengujian ulang setelah remediasi.</li>
+  </ul>
+{% endblock %}
