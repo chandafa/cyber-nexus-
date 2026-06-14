@@ -28,3 +28,7 @@ wordlists/rockyou_full.txt
 # Build/run logs
 *.log
 build.exit
+
+# Certificates
+python/modules/waf_cert.pem
+python/modules/waf_key.pem

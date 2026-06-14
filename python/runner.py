@@ -123,21 +123,26 @@ def dispatch(command: str, kwargs: dict) -> dict:
 
     if command == 'waf':
         from modules import waf
-        # args: listen_port, backend, backend_port, max_rps
+        # args: listen_port, backend, backend_port, max_rps, max_log_mb, ssl_enabled, ssl_cert_type, ssl_cert_path, ssl_key_path
         fg = str(kwargs.get('foreground', '')).lower() in ('1', 'true', 'yes')
+        run_args = {
+            'listen_port': kwargs.get('listen_port', '8080'),
+            'backend': kwargs.get('backend', '127.0.0.1'),
+            'backend_port': kwargs.get('backend_port', '8000'),
+            'max_rps': kwargs.get('max_rps', '10'),
+            'max_log_mb': kwargs.get('max_log_mb', '10'),
+            'learning_mode': kwargs.get('learning_mode', 'false'),
+            'allowlist_ips': kwargs.get('allowlist_ips', ''),
+            'allowlist_paths': kwargs.get('allowlist_paths', ''),
+            'ssl_enabled': kwargs.get('ssl_enabled', 'false'),
+            'ssl_cert_type': kwargs.get('ssl_cert_type', 'self_signed'),
+            'ssl_cert_path': kwargs.get('ssl_cert_path', ''),
+            'ssl_key_path': kwargs.get('ssl_key_path', '')
+        }
         if fg:
-            return waf.run_foreground(
-                listen_port=kwargs.get('listen_port', '8080'),
-                backend=kwargs.get('backend', '127.0.0.1'),
-                backend_port=kwargs.get('backend_port', '8000'),
-                max_rps=kwargs.get('max_rps', '10'),
-            )
-        return waf.run(
-            listen_port=kwargs.get('listen_port', '8080'),
-            backend=kwargs.get('backend', '127.0.0.1'),
-            backend_port=kwargs.get('backend_port', '8000'),
-            max_rps=kwargs.get('max_rps', '10'),
-        )
+            return waf.run_foreground(**run_args)
+        return waf.run(**run_args)
+
     if command == 'waf_stop':
         from modules import waf
         return waf.stop()
@@ -150,6 +155,44 @@ def dispatch(command: str, kwargs: dict) -> dict:
         from modules import waf
         limit = int(kwargs.get('limit', '200'))
         return waf.get_logs(limit=limit)
+
+    if command == 'waf_get_vhosts':
+        from modules import waf
+        return waf.get_vhosts()
+
+    if command == 'waf_save_vhost':
+        from modules import waf
+        return waf.save_vhost(
+            hostname=kwargs.get('hostname', ''),
+            backend_host=kwargs.get('backend_host', '127.0.0.1'),
+            backend_port=kwargs.get('backend_port', '8000'),
+            max_rps=kwargs.get('max_rps', '10'),
+            learning_mode=kwargs.get('learning_mode', 'false'),
+            allowlist_ips=kwargs.get('allowlist_ips', ''),
+            allowlist_paths=kwargs.get('allowlist_paths', ''),
+            rules_json=kwargs.get('rules_json', '[]')
+        )
+
+    if command == 'waf_delete_vhost':
+        from modules import waf
+        return waf.delete_vhost(hostname=kwargs.get('hostname', ''))
+
+    if command == 'waf_get_rules':
+        from modules import waf
+        return waf.get_custom_rules()
+
+    if command == 'waf_save_rule':
+        from modules import waf
+        return waf.save_custom_rule(
+            name=kwargs.get('name', ''),
+            pattern=kwargs.get('pattern', ''),
+            description=kwargs.get('description', ''),
+            enabled=kwargs.get('enabled', 'true')
+        )
+
+    if command == 'waf_delete_rule':
+        from modules import waf
+        return waf.delete_custom_rule(name=kwargs.get('name', ''))
 
     # ----------------------------------------------------- modul baru SDD v2
     if command == 'ssl_audit':

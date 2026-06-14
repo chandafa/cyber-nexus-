@@ -86,9 +86,15 @@ export const useScanRuntimeStore = create<RuntimeStore>((set, get) => {
       const mod = idToModule.get(e.payload.scan_id);
       if (!mod) return;
       const ok = e.payload.exit_code === 0;
-      buffers
-        .get(mod)
-        ?.push(ok ? "[*] Scan selesai." : `[ERROR] Scan gagal (exit ${e.payload.exit_code}).`);
+      if (mod === "waf") {
+        buffers
+          .get(mod)
+          ?.push(ok ? "[*] WAF dihentikan." : `[ERROR] WAF terhenti (exit ${e.payload.exit_code}).`);
+      } else {
+        buffers
+          .get(mod)
+          ?.push(ok ? "[*] Scan selesai." : `[ERROR] Scan gagal (exit ${e.payload.exit_code}).`);
+      }
       bump(mod, { running: false, progress: null, status: ok ? "completed" : "failed" });
       idToModule.delete(e.payload.scan_id);
       useScanStore.getState().refreshHistory();
