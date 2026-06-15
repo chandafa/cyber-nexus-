@@ -85,6 +85,11 @@ class DefenseMonitor:
                                'recommendation': msg})
                 cb(f'[{"OK" if current == expected else "WARN"}] {key} = {current}')
         except FileNotFoundError:
+            from core.subprocess_runner import demo_disabled, DemoDisabled
+            if demo_disabled():
+                cb('[REAL] /etc/ssh/sshd_config tidak ada (sistem non-Linux / tanpa '
+                   'SSH server). Mode eksekusi nyata: hasil contoh tidak ditampilkan.')
+                raise DemoDisabled('ssh hardening: sshd_config tidak tersedia')
             cb('[DEMO] /etc/ssh/sshd_config tidak ditemukan — hasil demo.')
             demo_vals = {'PermitRootLogin': 'yes', 'PasswordAuthentication': 'yes',
                          'X11Forwarding': 'no', 'MaxAuthTries': '6'}
@@ -145,16 +150,34 @@ class DefenseMonitor:
 
 
 def run(submode: str = 'all', **kwargs) -> dict:
+    """Jalankan tiap sub-cek secara independen. Di mode eksekusi nyata, sub-cek
+    yang hanya berlaku di Linux (ssh/suid/lynis) akan di-SKIP dengan jujur bila
+    tidak tersedia — TANPA membatalkan sub-cek lain yang menghasilkan data nyata
+    (mis. firewall & open ports via netsh/netstat di Windows)."""
+    from core.subprocess_runner import DemoDisabled
     mon = DefenseMonitor()
     out = {'module': 'defense', 'submode': submode}
+    skipped = []
+
+    def _try(name, fn):
+        try:
+            return fn()
+        except DemoDisabled:
+            emit_line(f'[SKIP] {name}: tidak tersedia / tidak berlaku di sistem ini '
+                      f'(mode nyata — tanpa data contoh).')
+            skipped.append(name)
+            return None
+
     if submode in ('all', 'firewall'):
-        out['firewall'] = mon.get_firewall_rules()
+        out['firewall'] = _try('firewall', mon.get_firewall_rules)
     if submode in ('all', 'ports'):
-        out['open_ports'] = mon.find_open_ports()
+        out['open_ports'] = _try('open_ports', mon.find_open_ports)
     if submode in ('all', 'ssh'):
-        out['ssh_checks'] = mon.check_ssh_hardening()
+        out['ssh_checks'] = _try('ssh', mon.check_ssh_hardening)
     if submode in ('all', 'suid'):
-        out['suid_files'] = mon.find_suid_files()
+        out['suid_files'] = _try('suid', mon.find_suid_files)
     if submode in ('all', 'lynis'):
-        out['lynis'] = mon.run_lynis()
+        out['lynis'] = _try('lynis', mon.run_lynis)
+    if skipped:
+        out['skipped'] = skipped
     return out

@@ -51,6 +51,14 @@ def run(old_session: str = '', new_session: str = '', **kwargs) -> dict:
     cb = emit_line
     diff = ScanDiff()
     if not old_session or not new_session:
+        from core.subprocess_runner import demo_disabled
+        if demo_disabled():
+            cb('[REAL] Pilih dua sesi scan untuk dibandingkan. '
+               'Mode eksekusi nyata: diff contoh tidak ditampilkan.')
+            empty_p = {'newly_opened': [], 'newly_closed': [], 'version_changes': []}
+            empty_v = {'new_findings': [], 'fixed_findings': [], 'still_present_count': 0}
+            return {'module': 'diff', 'old_session': old_session,
+                    'new_session': new_session, 'ports': empty_p, 'vulns': empty_v}
         cb('[DEMO] Sesi tidak lengkap — diff demo.')
         old_p = [{'port': 22, 'protocol': 'tcp', 'version': 'OpenSSH 8.2'},
                  {'port': 80, 'protocol': 'tcp', 'version': 'nginx 1.18'}]

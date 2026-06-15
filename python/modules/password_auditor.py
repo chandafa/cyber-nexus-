@@ -150,6 +150,7 @@ class PasswordAuditor:
 
 def run(submode: str = 'hydra', target: str = '', protocol: str = 'ssh',
         username: str = '', password_list: str = 'wordlists/rockyou.txt',
+        user_list: str = '', userlist: str = '',
         hash_file: str = '', hash_mode: int = 0, hash_string: str = '', **kwargs) -> dict:
     auditor = PasswordAuditor()
     if submode == 'detect':
@@ -158,7 +159,8 @@ def run(submode: str = 'hydra', target: str = '', protocol: str = 'ssh',
     if submode == 'hashcat':
         res = auditor.run_hashcat(hash_file, int(hash_mode), password_list)
         return {'module': 'password', 'submode': 'hashcat', **res}
-    # default hydra
-    res = auditor.run_hydra(target, protocol, username or None, None, password_list)
+    # default hydra — pakai single username, atau userlist bila diberikan.
+    ul = (user_list or userlist).strip() or None
+    res = auditor.run_hydra(target, protocol, username or None, ul, password_list)
     return {'module': 'password', 'submode': 'hydra', 'target': target,
             'protocol': protocol, **res}

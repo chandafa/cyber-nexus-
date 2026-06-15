@@ -6,6 +6,14 @@ import { useSettingsStore } from "../app/store/settings.store";
 import { useScanRuntimeStore } from "../app/store/scanRuntime.store";
 import { DependencyCard } from "../components/DependencyCard";
 import { chooseOutputDir } from "../lib/output";
+import {
+  checkForUpdate,
+  downloadInstallRelaunch,
+  formatBytes,
+  getCurrentVersion,
+  initialUpdateState,
+  type UpdateState,
+} from "../lib/updater";
 
 type Field = { key: string; label: string; type?: "text" | "number" | "select"; options?: string[] };
 
@@ -40,10 +48,32 @@ export const Settings: React.FC = () => {
   const installRunning = useScanRuntimeStore((s) => s.scans["install"]?.running ?? false);
   const [draft, setDraft] = useState<Record<string, string>>({});
 
+  // ---- Auto-update aplikasi (Tauri updater + GitHub Release) ----
+  const [upd, setUpd] = useState<UpdateState>(initialUpdateState);
+  const updBusy = ["checking", "downloading", "installing", "relaunching"].includes(upd.phase);
+
+  const handleCheckUpdate = async () => {
+    setUpd({ ...initialUpdateState, currentVersion: upd.currentVersion, phase: "checking" });
+    try {
+      setUpd(await checkForUpdate());
+    } catch (e: any) {
+      setUpd((p) => ({ ...p, phase: "error", error: String(e?.message ?? e) }));
+    }
+  };
+
+  const handleRunUpdate = async () => {
+    try {
+      await downloadInstallRelaunch((s) => setUpd(s));
+    } catch (e: any) {
+      setUpd((p) => ({ ...p, phase: "error", error: String(e?.message ?? e) }));
+    }
+  };
+
   useEffect(() => {
     loadSettings();
     refreshDeps();
     refreshWsl();
+    getCurrentVersion().then((v) => setUpd((p) => ({ ...p, currentVersion: v }))).catch(() => {});
   }, [loadSettings, refreshDeps, refreshWsl]);
 
   useEffect(() => setDraft(settings), [settings]);
@@ -165,6 +195,94 @@ export const Settings: React.FC = () => {
             )}
           </div>
         </div>
+      </div>
+
+      {/* Update Aplikasi — auto-update dari GitHub Release (terverifikasi tanda tangan) */}
+      <div className="nx-card mt-5">
+        <div className="mb-1 flex items-center justify-between">
+          <h2 className="nx-section">Update Aplikasi</h2>
+          <button
+            className="nx-btn-ghost px-2.5 py-1 text-[11px]"
+            onClick={handleCheckUpdate}
+            disabled={updBusy}
+          >
+            <Ic.refresh className={`h-3.5 w-3.5 ${upd.phase === "checking" ? "animate-spin" : ""}`} />
+            Periksa Pembaruan
+          </button>
+        </div>
+        <p className="mb-4 text-xs text-nexus-muted">
+          Versi terpasang: <b>v{upd.currentVersion ?? "—"}</b>. Pembaruan diunduh otomatis dari
+          GitHub Release resmi, diverifikasi tanda tangan digital, lalu aplikasi me-restart sendiri.
+        </p>
+
+        {upd.phase === "uptodate" && (
+          <div className="flex items-center gap-3 border border-nexus-green/40 bg-nexus-green/10 px-3 py-2.5 text-xs text-nexus-green">
+            <span className="h-2 w-2 shrink-0 rounded-full bg-nexus-green" />
+            Aplikasi sudah versi terbaru (v{upd.currentVersion}).
+          </div>
+        )}
+
+        {upd.phase === "error" && (
+          <div className="border border-severity-high/40 bg-severity-high/10 px-3 py-2.5 text-xs text-red-200">
+            Gagal memeriksa/memasang pembaruan: {upd.error}
+          </div>
+        )}
+
+        {(upd.phase === "available" ||
+          upd.phase === "downloading" ||
+          upd.phase === "installing" ||
+          upd.phase === "relaunching") && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3 border border-nexus-accent/40 bg-nexus-accent/10 px-3 py-2.5">
+              <div className="min-w-0 text-xs">
+                <span className="font-semibold text-nexus-accent">
+                  Versi baru tersedia: v{upd.version}
+                </span>
+                {upd.date && <span className="ml-2 text-nexus-muted">({upd.date.slice(0, 10)})</span>}
+                {upd.notes && (
+                  <span className="mt-1 block max-h-20 overflow-auto whitespace-pre-wrap text-nexus-muted">
+                    {upd.notes}
+                  </span>
+                )}
+              </div>
+              {upd.phase === "available" && (
+                <button className="nx-btn-primary shrink-0" onClick={handleRunUpdate}>
+                  <Ic.download className="h-4 w-4" /> Update Sekarang
+                </button>
+              )}
+            </div>
+
+            {(upd.phase === "downloading" ||
+              upd.phase === "installing" ||
+              upd.phase === "relaunching") && (
+              <div>
+                <div className="mb-1 flex items-center justify-between text-[11px] text-nexus-muted">
+                  <span>
+                    {upd.phase === "downloading" && "Mengunduh pembaruan..."}
+                    {upd.phase === "installing" && "Memasang pembaruan..."}
+                    {upd.phase === "relaunching" && "Memulai ulang aplikasi..."}
+                  </span>
+                  <span>
+                    {upd.total
+                      ? `${formatBytes(upd.downloaded)} / ${formatBytes(upd.total)} (${upd.percent}%)`
+                      : `${upd.percent}%`}
+                  </span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-nexus-hairline">
+                  <div
+                    className="h-full bg-nexus-accent transition-all duration-150"
+                    style={{
+                      width:
+                        upd.phase === "installing" || upd.phase === "relaunching"
+                          ? "100%"
+                          : `${upd.percent}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Backend Eksekusi (WSL) — untuk tool yang hanya jalan di Linux */}

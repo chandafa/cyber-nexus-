@@ -27,6 +27,12 @@ import { WordlistManager } from "../pages/WordlistManager";
 import { Scheduler } from "../pages/Scheduler";
 import { AttackSimulation } from "../pages/AttackSimulation";
 import { DefenseSuite } from "../pages/DefenseSuite";
+// Terminal interaktif + modul baru
+import { Shell } from "../pages/Shell";
+import { DnsRecon } from "../pages/DnsRecon";
+import { DirFuzzer } from "../pages/DirFuzzer";
+import { Listener } from "../pages/Listener";
+import { HashTool } from "../pages/HashTool";
 
 export const router = createHashRouter([
   { path: "/setup", element: <SetupWizard /> },
@@ -59,6 +65,12 @@ export const router = createHashRouter([
       { path: "scheduler", element: <Scheduler /> },
       { path: "attack-simulation", element: <AttackSimulation /> },
       { path: "defense-suite", element: <DefenseSuite /> },
+      // Terminal interaktif + modul baru
+      { path: "terminal", element: <Shell /> },
+      { path: "dns-recon", element: <DnsRecon /> },
+      { path: "dir-fuzzer", element: <DirFuzzer /> },
+      { path: "listener", element: <Listener /> },
+      { path: "hash-tool", element: <HashTool /> },
     ],
   },
 ]);

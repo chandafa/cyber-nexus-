@@ -1,0 +1,19 @@
+# requirements-runtime.txt — dependency Python yang DI-BUNDLE bersama aplikasi.
+#
+# Subset dari requirements.txt yang AMAN untuk Python embeddable (pure-Python atau
+# punya wheel Windows, TANPA lib native berat). Dipasang oleh
+# scripts/prepare-python-runtime.ps1 ke python-runtime/Lib/site-packages.
+#
+# Sengaja DIKECUALIKAN (modul punya fallback / tool dipasang terpisah):
+#   - weasyprint  → butuh GTK native; report otomatis fallback ke HTML.
+#   - scapy       → butuh Npcap saat runtime; modul terkait fallback.
+#   - sslyze/prowler → dipasang via Setup/Installer ke venv terisolasi.
+jinja2==3.1.2
+requests==2.31.0
+networkx==3.2
+colorama==0.4.6
+tqdm==4.66.1
+APScheduler==3.10.4
+python-nmap==0.7.1
+dpkt==1.9.8
+python-evtx==0.7.4

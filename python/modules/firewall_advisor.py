@@ -49,6 +49,13 @@ def run(ports: str = '', essential: str = '22,80,443', **kwargs) -> dict:
     except Exception:
         port_list = []
     if not port_list:
+        from core.subprocess_runner import demo_disabled
+        if demo_disabled():
+            pm = 'netsh' if platform.system() == 'Windows' else 'ufw'
+            cb('[REAL] Tidak ada data port dari scan — jalankan port scan dulu. '
+               'Mode eksekusi nyata: contoh palsu tidak ditampilkan.')
+            return {'module': 'firewall', 'platform': platform.system(),
+                    'preferred': pm, 'suggestions': [], 'total': 0}
         cb('[DEMO] Tidak ada data port — memakai contoh hasil port scan.')
         port_list = [{'port': 22, 'protocol': 'tcp', 'service': 'ssh'},
                      {'port': 23, 'protocol': 'tcp', 'service': 'telnet'},

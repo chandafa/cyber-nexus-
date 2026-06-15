@@ -203,6 +203,34 @@ def dispatch(command: str, kwargs: dict) -> dict:
         from modules import ids_monitor
         return ids_monitor.run(kwargs.get('interface', 'eth0'), kwargs.get('duration', 15))
 
+    # ----------------------------------------------------- modul baru (recon/offensive)
+    if command == 'dns_recon':
+        from modules import dns_recon
+        domain = sanitize_target(kwargs.get('domain', ''))
+        wl = kwargs.get('wordlist', '')
+        if wl:
+            sanitize_filepath(wl)
+        return dns_recon.run(domain, wl)
+
+    if command == 'dir_fuzz':
+        from modules import dir_fuzz
+        target = sanitize_url(kwargs.get('target', ''))
+        wl = kwargs.get('wordlist', '')
+        if wl:
+            sanitize_filepath(wl)
+        return dir_fuzz.run(target, wl, kwargs.get('extensions', ''))
+
+    if command == 'listener':
+        from modules import listener
+        return listener.run(**kwargs)
+
+    if command == 'hash_tool':
+        from modules import hash_tool
+        wl = kwargs.get('wordlist', '')
+        if wl:
+            sanitize_filepath(wl)
+        return hash_tool.run(**kwargs)
+
     if command == 'scope':
         from core import scope_guard
         return scope_guard.run(**kwargs)

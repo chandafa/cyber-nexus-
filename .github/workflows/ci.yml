@@ -1,0 +1,51 @@
+name: CI
+
+# Validasi cepat setiap push/PR ke main: typecheck frontend, kompilasi Python,
+# dan cek kompilasi Rust/Tauri. Build rilis penuh ada di release.yml.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Typecheck + build frontend
+        run: npm run build
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Kompilasi semua modul Python (cek sintaks)
+        run: python -m compileall -q python
+
+  rust:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - name: Build frontend (diperlukan generate_context Tauri)
+        run: npm run build
+      - name: cargo check (cek kompilasi Rust + Tauri)
+        working-directory: src-tauri
+        run: cargo check --all-targets

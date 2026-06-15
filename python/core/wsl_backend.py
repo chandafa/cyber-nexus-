@@ -83,7 +83,7 @@ def set_backend(backend: str = "", distro: str = "", no_demo=None, wsl_user: str
     save_config(cfg)
     return {"backend": cfg.get("backend", "auto"),
             "wsl_distro": cfg.get("wsl_distro", ""),
-            "no_demo": cfg.get("no_demo", False),
+            "no_demo": cfg.get("no_demo", True),
             "wsl_user": cfg.get("wsl_user", "root")}
 
 
@@ -99,7 +99,10 @@ def get_no_demo() -> bool:
     env = os.environ.get("NEXUS_NO_DEMO")
     if env is not None:
         return env.lower() in ("1", "true", "yes", "on")
-    return bool(load_config().get("no_demo", False))
+    # Default: mode eksekusi NYATA aktif (no_demo=True). Modul yang gagal akan
+    # memunculkan error nyata, bukan data demo palsu. Pengguna masih bisa
+    # menyalakan kembali demo lewat toggle di Settings (menyimpan no_demo=false).
+    return bool(load_config().get("no_demo", True))
 
 
 # ------------------------------------------------------------------ deteksi
