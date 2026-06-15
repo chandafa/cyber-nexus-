@@ -88,6 +88,18 @@ class TestWAF(unittest.TestCase):
         except urllib.error.HTTPError as e:
             self.assertEqual(e.code, 403)
 
+        # Test Clear Logs
+        log_res = waf.get_logs()
+        self.assertGreater(len(log_res.get('logs', [])), 0)
+        self.assertGreater(log_res.get('stats', {}).get('total_requests', 0), 0)
+
+        clear_res = waf.clear_logs()
+        self.assertEqual(clear_res.get('status'), 'ok')
+
+        log_res_after = waf.get_logs()
+        self.assertEqual(len(log_res_after.get('logs', [])), 0)
+        self.assertEqual(log_res_after.get('stats', {}).get('total_requests', 0), 0)
+
     def test_rate_limiting(self):
         listen_port = self.get_free_port()
         waf.run(

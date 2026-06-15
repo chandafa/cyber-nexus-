@@ -156,6 +156,10 @@ def dispatch(command: str, kwargs: dict) -> dict:
         limit = int(kwargs.get('limit', '200'))
         return waf.get_logs(limit=limit)
 
+    if command == 'waf_clear_logs':
+        from modules import waf
+        return waf.clear_logs()
+
     if command == 'waf_get_vhosts':
         from modules import waf
         return waf.get_vhosts()
