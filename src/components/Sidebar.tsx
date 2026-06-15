@@ -81,6 +81,7 @@ const GROUPS: { title: string; icon: IconComp; items: NavItem[] }[] = [
     title: "Sistem",
     icon: Ic.settings,
     items: [
+      { to: "/system-health", label: "System Monitor", icon: Ic.server },
       { to: "/history", label: "History", icon: Ic.history },
       { to: "/scheduler", label: "Scheduler", icon: Ic.scheduler },
       { to: "/wordlist-manager", label: "Wordlist Manager", icon: Ic.wordlistMgr },

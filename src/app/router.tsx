@@ -28,6 +28,7 @@ import { Scheduler } from "../pages/Scheduler";
 import { AttackSimulation } from "../pages/AttackSimulation";
 import { DefenseSuite } from "../pages/DefenseSuite";
 import { WAF } from "../pages/WAF";
+import { SystemHealth } from "../pages/SystemHealth";
 
 export const router = createHashRouter([
   { path: "/setup", element: <SetupWizard /> },
@@ -36,6 +37,7 @@ export const router = createHashRouter([
     element: <Layout />,
     children: [
       { index: true, element: <Dashboard /> },
+      { path: "system-health", element: <SystemHealth /> },
       { path: "port-scanner", element: <PortScanner /> },
       { path: "network-scanner", element: <NetworkScanner /> },
       { path: "vuln-scanner", element: <VulnScanner /> },

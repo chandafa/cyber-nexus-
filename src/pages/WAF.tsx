@@ -3,9 +3,10 @@ import React, { useRef, useState, useEffect } from "react";
 import { Ic } from "../lib/icons";
 import { ModuleScaffold } from "../components/ModuleScaffold";
 import { type ScanConsoleHandle } from "../components/ScanConsole";
-import { buildArgs, runToolJson } from "../lib/tauri";
+import { buildArgs, runToolJson, isTauri } from "../lib/tauri";
 import { useScanRuntimeStore } from "../app/store/scanRuntime.store";
 import { exportTextFile } from "../lib/output";
+import { open } from "@tauri-apps/plugin-dialog";
 
 // Lightweight pure CSS-driven Info Tooltip (left-aligned to prevent clipping)
 const HelpTip: React.FC<{ text: string }> = ({ text }) => {
@@ -373,14 +374,15 @@ const WafVhostTab: React.FC<{
 
   const filtered = vhosts.filter((vh) =>
     vh.hostname.toLowerCase().includes(search.toLowerCase()) ||
-    (vh.backend_host + ":" + vh.backend_port).toLowerCase().includes(search.toLowerCase())
+    (vh.backend_host + ":" + vh.backend_port).toLowerCase().includes(search.toLowerCase()) ||
+    (vh.root_directory || "").toLowerCase().includes(search.toLowerCase())
   );
 
   return (
     <div className="p-6 space-y-4 bg-nexus-surface h-full overflow-auto">
       <div className="flex justify-between items-center border-b border-nexus-hairline pb-3">
         <div>
-          <h3 className="text-base font-semibold text-nexus-text">Virtual Hosts</h3>
+          <h3 className="text-base font-semibold text-nexus-text font-mono">Virtual Hosts</h3>
           <p className="text-xs text-nexus-muted">Kelola domain local, default routing, dan port forwarding untuk proxy WAF.</p>
         </div>
         <div className="relative w-64">
@@ -430,16 +432,25 @@ const WafVhostTab: React.FC<{
                     <span className="flex items-center gap-2">
                       <span className="h-2 w-2 rounded-full bg-nexus-accent" />
                       {vh.hostname}
+                      <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-semibold border ${vh.vhost_type === 'static' ? 'bg-purple-950/40 text-purple-300 border-purple-800' : 'bg-blue-950/40 text-blue-300 border-blue-800'}`}>
+                        {vh.vhost_type === 'static' ? 'Static' : 'Proxy'}
+                      </span>
                     </span>
                   </td>
-                  <td className="p-3.5 font-mono text-nexus-muted">
-                    <span className="flex items-center gap-1">
-                      <span className="text-nexus-accent font-semibold">→</span> {vh.backend_host}:{vh.backend_port}
-                    </span>
+                  <td className="p-3.5 font-mono text-nexus-muted truncate max-w-xs" title={vh.vhost_type === 'static' ? vh.root_directory : `${vh.backend_host}:${vh.backend_port}`}>
+                    {vh.vhost_type === 'static' ? (
+                      <span className="flex items-center gap-1.5 text-purple-400">
+                        <Ic.folder className="h-3.5 w-3.5" /> {vh.root_directory}
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1">
+                        <span className="text-nexus-accent font-semibold">→</span> {vh.backend_host}:{vh.backend_port}
+                      </span>
+                    )}
                   </td>
                   <td className="p-3.5 font-mono text-nexus-text">{vh.max_rps} RPS</td>
                   <td className="p-3.5">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${vh.learning_mode ? 'bg-yellow-950/40 text-yellow-300 border border-yellow-800' : 'bg-green-950/40 text-green-300 border border-green-800'}`}>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${vh.learning_mode ? 'bg-yellow-950/40 text-yellow-300 border border-yellow-800' : 'bg-green-950/40 text-green-300 border-green-800'}`}>
                       {vh.learning_mode ? "Learning" : "Blocking"}
                     </span>
                   </td>
@@ -618,6 +629,8 @@ export const WAF: React.FC = () => {
   const [newVhostLearning, setNewVhostLearning] = useState(false);
   const [newVhostIps, setNewVhostIps] = useState("");
   const [newVhostPaths, setNewVhostPaths] = useState("");
+  const [newVhostType, setNewVhostType] = useState<"proxy" | "static">("proxy");
+  const [newVhostRootDir, setNewVhostRootDir] = useState("");
   const [selectedRules, setSelectedRules] = useState<string[]>([
     "sql_injection", "xss", "path_traversal", "cmd_injection", "scanner_detected"
   ]);
@@ -667,6 +680,21 @@ export const WAF: React.FC = () => {
     }
   };
 
+  const browseVhostFolder = async () => {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "Pilih Folder Website (Static)"
+      });
+      if (typeof selected === "string") {
+        setNewVhostRootDir(selected);
+      }
+    } catch (err) {
+      console.error("Gagal memilih folder:", err);
+    }
+  };
+
   const handleSaveVhost = async () => {
     if (!newVhostHost) return;
     try {
@@ -678,11 +706,14 @@ export const WAF: React.FC = () => {
         learning_mode: newVhostLearning,
         allowlist_ips: newVhostIps,
         allowlist_paths: newVhostPaths,
-        rules_json: JSON.stringify(selectedRules)
+        rules_json: JSON.stringify(selectedRules),
+        vhost_type: newVhostType,
+        root_directory: newVhostRootDir
       }));
       setNewVhostHost("");
       setNewVhostIps("");
       setNewVhostPaths("");
+      setNewVhostRootDir("");
       fetchVhosts();
     } catch (err) {
       console.error(err);
@@ -1013,16 +1044,53 @@ export const WAF: React.FC = () => {
                   placeholder="e.g. app.local"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="nx-label">Backend IP/Host</label>
-                  <input className="nx-input font-mono" value={newVhostBackend} onChange={(e) => setNewVhostBackend(e.target.value)} />
-                </div>
-                <div>
-                  <label className="nx-label">Backend Port</label>
-                  <input className="nx-input font-mono" value={newVhostPort} onChange={(e) => setNewVhostPort(e.target.value)} />
-                </div>
+              <div>
+                <label className="nx-label">Target Type</label>
+                <select
+                  className="nx-input"
+                  value={newVhostType}
+                  onChange={(e) => setNewVhostType(e.target.value as any)}
+                >
+                  <option value="proxy">Reverse Proxy (Forward to Port)</option>
+                  <option value="static">Static Directory (Serve Folder)</option>
+                </select>
               </div>
+              {newVhostType === "proxy" ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="nx-label">Backend IP/Host</label>
+                    <input className="nx-input font-mono" value={newVhostBackend} onChange={(e) => setNewVhostBackend(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="nx-label">Backend Port</label>
+                    <input className="nx-input font-mono" value={newVhostPort} onChange={(e) => setNewVhostPort(e.target.value)} />
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="nx-label">
+                    Static Folder Path
+                    <HelpTip text="Direktori lokal berisi file HTML/CSS/JS (seperti folder dist/build) untuk di-host secara lokal." />
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      className="nx-input font-mono text-xs flex-1"
+                      value={newVhostRootDir}
+                      onChange={(e) => setNewVhostRootDir(e.target.value)}
+                      placeholder="e.g. D:/my-site/dist"
+                    />
+                    {isTauri() && (
+                      <button
+                        type="button"
+                        onClick={browseVhostFolder}
+                        className="nx-btn-ghost px-2 py-1 flex items-center justify-center border border-nexus-border"
+                      >
+                        <Ic.folder className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="nx-label">Max RPS</label>

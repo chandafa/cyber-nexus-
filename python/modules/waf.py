@@ -32,6 +32,15 @@ _DB_PATH = os.path.join(os.path.dirname(__file__), "waf_events.db")
 _IN_MEMORY_LOGS = []
 _LOG_CAPACITY = int(os.environ.get('WAF_LOG_CAPACITY', '5000'))
 _MAX_LOG_MB = 10.0
+_LOCAL_VHOSTS_PATH = os.path.join(os.path.dirname(__file__), "vhosts_local.json")
+
+def _init_local_vhosts_file():
+    if not os.path.exists(_LOCAL_VHOSTS_PATH):
+        try:
+            with open(_LOCAL_VHOSTS_PATH, 'w', encoding='utf-8') as f:
+                json.dump([], f)
+        except Exception:
+            pass
 
 # HTML template forblocked requests (branded as Cyber Nexus WAF)
 HTML_BLOCK_TEMPLATE = """<!DOCTYPE html>
@@ -159,6 +168,7 @@ HTML_BLOCK_TEMPLATE = """<!DOCTYPE html>
 
 
 def _init_db():
+    _init_local_vhosts_file()
     try:
         conn = sqlite3.connect(_DB_PATH)
         cur = conn.cursor()
@@ -188,8 +198,10 @@ def _init_db():
             CREATE TABLE IF NOT EXISTS vhosts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 hostname TEXT UNIQUE,
+                vhost_type TEXT DEFAULT 'proxy',
                 backend_host TEXT,
                 backend_port INTEGER,
+                root_directory TEXT DEFAULT '',
                 max_rps INTEGER,
                 learning_mode INTEGER DEFAULT 0,
                 allowlist_ips TEXT,
@@ -198,6 +210,14 @@ def _init_db():
             )
             """
         )
+        # Migrasi kolom vhost_type & root_directory untuk vhosts
+        cur.execute("PRAGMA table_info(vhosts)")
+        cols_vh = [c[1] for c in cur.fetchall()]
+        if 'vhost_type' not in cols_vh:
+            cur.execute("ALTER TABLE vhosts ADD COLUMN vhost_type TEXT DEFAULT 'proxy'")
+        if 'root_directory' not in cols_vh:
+            cur.execute("ALTER TABLE vhosts ADD COLUMN root_directory TEXT DEFAULT ''")
+
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS custom_rules (
@@ -285,35 +305,107 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
 
     def _get_vhost_config(self, hostname: str) -> dict:
         default_config = {
+            'vhost_type': 'proxy',
             'backend_host': self.backend_host,
             'backend_port': self.backend_port,
+            'root_directory': '',
             'max_rps': self.max_rps,
             'learning_mode': self.learning_mode,
             'allowlist_ips': self.allowlist_ips,
             'allowlist_paths': self.allowlist_paths,
             'rules': ["sql_injection", "xss", "path_traversal", "cmd_injection", "scanner_detected"]
         }
+        _init_local_vhosts_file()
+        try:
+            # 1. Try JSON configuration file
+            if os.path.exists(_LOCAL_VHOSTS_PATH):
+                with open(_LOCAL_VHOSTS_PATH, 'r', encoding='utf-8') as f:
+                    vhosts_list = json.load(f)
+                
+                # Search exact hostname match
+                match = None
+                for vh in vhosts_list:
+                    if vh.get('hostname', '').lower() == hostname:
+                        match = vh
+                        break
+                
+                # Search subdomain wildcard match (e.g. *.azharmtq.my.id)
+                if not match:
+                    for vh in vhosts_list:
+                        vh_host = vh.get('hostname', '').lower()
+                        if vh_host.startswith('*.'):
+                            suffix = vh_host[2:]
+                            if hostname.endswith('.' + suffix) or hostname == suffix:
+                                match = vh
+                                break
+                
+                # Search global wildcard match
+                if not match:
+                    for vh in vhosts_list:
+                        if vh.get('hostname', '') == '*':
+                            match = vh
+                            break
+                            
+                if match:
+                    al_ips = match.get('allowlist_ips', '')
+                    al_paths = match.get('allowlist_paths', '')
+                    return {
+                        'vhost_type': match.get('vhost_type', 'proxy'),
+                        'backend_host': match.get('backend_host', '127.0.0.1'),
+                        'backend_port': int(match.get('backend_port', 8000)),
+                        'root_directory': match.get('root_directory', ''),
+                        'max_rps': int(match.get('max_rps', 10)),
+                        'learning_mode': bool(match.get('learning_mode', False)),
+                        'allowlist_ips': {ip.strip() for ip in al_ips.split(",") if ip.strip()} if isinstance(al_ips, str) else set(),
+                        'allowlist_paths': [p.strip() for p in al_paths.split(",") if p.strip()] if isinstance(al_paths, str) else [],
+                        'rules': match.get('rules', [])
+                    }
+        except Exception as e:
+            emit_line(f"[WAF] JSON config error: {e}")
+
+        # 2. Fallback to SQLite DB
         try:
             conn = sqlite3.connect(_DB_PATH)
             cur = conn.cursor()
-            # Exact match
-            cur.execute("SELECT backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules FROM vhosts WHERE hostname = ?", (hostname,))
-            row = cur.fetchone()
-            if not row:
-                # Wildcard match
-                cur.execute("SELECT backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules FROM vhosts WHERE hostname = ?", ('*',))
-                row = cur.fetchone()
+            cur.execute("SELECT hostname, backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules, vhost_type, root_directory FROM vhosts")
+            rows = cur.fetchall()
             conn.close()
 
-            if row:
-                bh, bp, mr, lm, al_ips, al_paths, r_str = row
+            match_row = None
+            # Search exact match
+            for r in rows:
+                if r[0].lower() == hostname:
+                    match_row = r
+                    break
+            
+            # Search subdomain wildcard match (e.g. *.azharmtq.my.id)
+            if not match_row:
+                for r in rows:
+                    pattern = r[0].lower()
+                    if pattern.startswith('*.'):
+                        suffix = pattern[2:]
+                        if hostname.endswith('.' + suffix) or hostname == suffix:
+                            match_row = r
+                            break
+
+            # Search global wildcard match
+            if not match_row:
+                for r in rows:
+                    if r[0] == '*':
+                        match_row = r
+                        break
+
+            if match_row:
+                hn, bh, bp, mr, lm, al_ips, al_paths, r_str, vh_type, root_dir = match_row
                 try:
                     rules_list = json.loads(r_str) if r_str else []
                 except Exception:
                     rules_list = []
                 return {
+                    'vhost_type': vh_type or 'proxy',
                     'backend_host': bh,
                     'backend_port': bp,
+                    'root_directory': root_dir or '',
                     'max_rps': mr,
                     'learning_mode': bool(lm),
                     'allowlist_ips': {ip.strip() for ip in al_ips.split(",") if ip.strip()} if al_ips else set(),
@@ -327,6 +419,20 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
     def _proxy_to_backend_custom(self, ip: str, body: bytes, decoded_path: str, decoded_body: str, headers_text: str, bh: str, bp: int):
         url = f'http://{bh}:{bp}{self.path}'
         headers = {k: v for k, v in self.headers.items() if k.lower() != 'host'}
+        
+        # Forward original Host name to backend via X-Forwarded headers
+        headers['X-Forwarded-Host'] = self.headers.get('Host', '')
+        if 'X-Forwarded-For' not in headers:
+            headers['X-Forwarded-For'] = ip
+        else:
+            headers['X-Forwarded-For'] = f"{headers['X-Forwarded-For']}, {self.client_address[0]}"
+            
+        if 'X-Forwarded-Proto' not in headers:
+            is_https = False
+            if hasattr(self.server, 'ssl_context') and self.server.ssl_context:
+                is_https = True
+            headers['X-Forwarded-Proto'] = 'https' if is_https else 'http'
+
         try:
             resp = requests.request(self.command, url, headers=headers, data=body, allow_redirects=False, timeout=10)
             self.send_response(resp.status_code)
@@ -350,8 +456,71 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(err_body.encode('utf-8'))
             self._log(f"{ip} -> 502 proxy error for {bh}:{bp}: {e}")
 
+    def _serve_static_directory(self, ip: str, root_dir: str, decoded_path: str):
+        import mimetypes
+        
+        path_only = decoded_path.split('?')[0].split('#')[0]
+        if path_only.startswith('/'):
+            path_only = path_only[1:]
+            
+        safe_path = os.path.normpath(os.path.join(root_dir, path_only))
+        norm_root = os.path.normpath(root_dir)
+        if not safe_path.startswith(norm_root):
+            self.send_response(403)
+            self.send_header('Content-Type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b"Forbidden: Path Traversal Detected")
+            log_event(ip, "block:static_traversal", decoded_path, "", "")
+            return
+            
+        if os.path.isdir(safe_path):
+            safe_path = os.path.join(safe_path, "index.html")
+            
+        if not os.path.isfile(safe_path):
+            self.send_response(404)
+            self.send_header('Content-Type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b"Not Found")
+            log_event(ip, "detect:404", decoded_path, "", "")
+            return
+            
+        mime_type, _ = mimetypes.guess_type(safe_path)
+        if not mime_type:
+            mime_type = "application/octet-stream"
+            
+        try:
+            with open(safe_path, "rb") as f:
+                content = f.read()
+            self.send_response(200)
+            self.send_header('Content-Type', mime_type)
+            self.send_header('Content-Length', str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+            log_event(ip, "allow:static", decoded_path, "", "")
+            self._log(f"{ip} -> GET {decoded_path} served static file: {safe_path} (200)")
+        except Exception as e:
+            self.send_response(500)
+            self.send_header('Content-Type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(f"Internal Server Error: {e}".encode('utf-8'))
+            self._log(f"{ip} -> static file read error: {e}")
+
+    def _forward_request(self, ip: str, body: bytes, decoded_path: str, decoded_body: str, headers_text: str, config: dict):
+        if config.get('vhost_type') == 'static' and config.get('root_directory'):
+            self._serve_static_directory(ip, config['root_directory'], decoded_path)
+        else:
+            self._proxy_to_backend_custom(ip, body, decoded_path, decoded_body, headers_text, config['backend_host'], config['backend_port'])
+
     def _proxy_request(self):
-        ip = self.client_address[0]
+        # Resolve real client IP (supporting Cloudflare Tunnel, Nginx, Ngrok, etc.)
+        ip = self.headers.get('CF-Connecting-IP')
+        if not ip:
+            xff = self.headers.get('X-Forwarded-For')
+            if xff:
+                ip = xff.split(',')[0].strip()
+        if not ip:
+            ip = self.client_address[0]
+
         length = int(self.headers.get('Content-Length', 0) or 0)
         body = self.rfile.read(length) if length else b''
         decoded_path = unquote(self.path or '')
@@ -374,14 +543,14 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
         # Check IP allowlist
         if ip in allowlist_ips:
             self._log(f"{ip} -> bypassed (IP in allowlist)")
-            self._proxy_to_backend_custom(ip, body, decoded_path, decoded_body, headers_text, backend_host, backend_port)
+            self._forward_request(ip, body, decoded_path, decoded_body, headers_text, config)
             return
 
         # Check Path allowlist
         for p in allowlist_paths:
             if decoded_path.startswith(p):
                 self._log(f"{ip} -> bypassed (Path {p} in allowlist)")
-                self._proxy_to_backend_custom(ip, body, decoded_path, decoded_body, headers_text, backend_host, backend_port)
+                self._forward_request(ip, body, decoded_path, decoded_body, headers_text, config)
                 return
 
         # Rate Limiting
@@ -460,7 +629,7 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 self._log(f"{ip} -> rules matched: {matched} (learning mode: ALLOWED)")
-                self._proxy_to_backend_custom(ip, body, decoded_path, decoded_body, headers_text, backend_host, backend_port)
+                self._forward_request(ip, body, decoded_path, decoded_body, headers_text, config)
             else:
                 try:
                     log_event(ip, matched, decoded_path, decoded_body, headers_text)
@@ -476,7 +645,7 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
                 self._log(f"{ip} -> 403 blocked by {matched}")
             return
 
-        self._proxy_to_backend_custom(ip, body, decoded_path, decoded_body, headers_text, backend_host, backend_port)
+        self._forward_request(ip, body, decoded_path, decoded_body, headers_text, config)
 
     def do_GET(self):
         self._proxy_request()
@@ -979,73 +1148,180 @@ def clear_logs() -> dict:
 # --- Virtual Hosts CRUD APIs ---
 
 def get_vhosts() -> dict:
+    _init_local_vhosts_file()
+    out = []
+    seen_hostnames = set()
+    
+    # 1. Load from JSON
+    try:
+        if os.path.exists(_LOCAL_VHOSTS_PATH):
+            with open(_LOCAL_VHOSTS_PATH, 'r', encoding='utf-8') as f:
+                vhosts_list = json.load(f)
+            for vh in vhosts_list:
+                hostname = vh.get('hostname', '').strip()
+                if hostname:
+                    out.append({
+                        'id': vh.get('id', hash(hostname)),
+                        'hostname': hostname,
+                        'vhost_type': vh.get('vhost_type', 'proxy'),
+                        'backend_host': vh.get('backend_host', '127.0.0.1'),
+                        'backend_port': str(vh.get('backend_port', 8000)),
+                        'root_directory': vh.get('root_directory', ''),
+                        'max_rps': vh.get('max_rps', 10),
+                        'learning_mode': bool(vh.get('learning_mode', False)),
+                        'allowlist_ips': vh.get('allowlist_ips', ''),
+                        'allowlist_paths': vh.get('allowlist_paths', ''),
+                        'rules': vh.get('rules', [])
+                    })
+                    seen_hostnames.add(hostname.lower())
+    except Exception as e:
+        emit_line(f"[WAF] get_vhosts JSON error: {e}")
+
+    # 2. Load from DB (compatibility fallback)
     try:
         _init_db()
         conn = sqlite3.connect(_DB_PATH)
         cur = conn.cursor()
-        cur.execute("SELECT id, hostname, backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules FROM vhosts")
+        cur.execute("SELECT id, hostname, backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules, vhost_type, root_directory FROM vhosts")
         rows = cur.fetchall()
         conn.close()
-        out = []
         for r in rows:
-            out.append({
-                'id': r[0],
-                'hostname': r[1],
-                'backend_host': r[2],
-                'backend_port': r[3],
-                'max_rps': r[4],
-                'learning_mode': bool(r[5]),
-                'allowlist_ips': r[6] or "",
-                'allowlist_paths': r[7] or "",
-                'rules': json.loads(r[8]) if r[8] else []
-            })
-        return {'status': 'ok', 'vhosts': out}
+            hostname = r[1].strip()
+            if hostname.lower() not in seen_hostnames:
+                out.append({
+                    'id': r[0],
+                    'hostname': hostname,
+                    'vhost_type': r[9] or 'proxy',
+                    'backend_host': r[2],
+                    'backend_port': str(r[3]),
+                    'root_directory': r[10] or '',
+                    'max_rps': r[4],
+                    'learning_mode': bool(r[5]),
+                    'allowlist_ips': r[6] or "",
+                    'allowlist_paths': r[7] or "",
+                    'rules': json.loads(r[8]) if r[8] else []
+                })
+                seen_hostnames.add(hostname.lower())
     except Exception as e:
-        return {'status': 'error', 'error': str(e)}
+        emit_line(f"[WAF] get_vhosts DB error: {e}")
+
+    return {'status': 'ok', 'vhosts': out}
 
 
 def save_vhost(hostname: str, backend_host: str, backend_port: str, max_rps: str,
-               learning_mode: str, allowlist_ips: str, allowlist_paths: str, rules_json: str) -> dict:
+               learning_mode: str, allowlist_ips: str, allowlist_paths: str, rules_json: str,
+               vhost_type: str = 'proxy', root_directory: str = '') -> dict:
+    _init_local_vhosts_file()
     try:
-        _init_db()
-        bp = int(backend_port)
-        mr = int(max_rps)
-        lm = 1 if str(learning_mode).lower() in ('1', 'true', 'yes') else 0
+        hostname = hostname.strip()
+        bp = int(backend_port) if backend_port else 8000
+        mr = int(max_rps) if max_rps else 10
+        lm = str(learning_mode).lower() in ('1', 'true', 'yes')
         rules_list = json.loads(rules_json) if rules_json else []
-        rules_str = json.dumps(rules_list)
 
-        conn = sqlite3.connect(_DB_PATH)
-        cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO vhosts (hostname, backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(hostname) DO UPDATE SET
-                backend_host=excluded.backend_host,
-                backend_port=excluded.backend_port,
-                max_rps=excluded.max_rps,
-                learning_mode=excluded.learning_mode,
-                allowlist_ips=excluded.allowlist_ips,
-                allowlist_paths=excluded.allowlist_paths,
-                rules=excluded.rules
-            """,
-            (hostname.strip(), backend_host.strip(), bp, mr, lm, allowlist_ips, allowlist_paths, rules_str)
-        )
-        conn.commit()
-        conn.close()
+        # 1. Save to JSON
+        vhosts_list = []
+        if os.path.exists(_LOCAL_VHOSTS_PATH):
+            with open(_LOCAL_VHOSTS_PATH, 'r', encoding='utf-8') as f:
+                try:
+                    vhosts_list = json.load(f)
+                except Exception:
+                    vhosts_list = []
+
+        found = False
+        for i, vh in enumerate(vhosts_list):
+            if vh.get('hostname', '').strip().lower() == hostname.lower():
+                vhosts_list[i] = {
+                    'id': vh.get('id', hash(hostname)),
+                    'hostname': hostname,
+                    'vhost_type': vhost_type,
+                    'backend_host': backend_host,
+                    'backend_port': bp,
+                    'root_directory': root_directory,
+                    'max_rps': mr,
+                    'learning_mode': lm,
+                    'allowlist_ips': allowlist_ips,
+                    'allowlist_paths': allowlist_paths,
+                    'rules': rules_list
+                }
+                found = True
+                break
+        
+        if not found:
+            vhosts_list.append({
+                'id': int(time.time() * 1000),
+                'hostname': hostname,
+                'vhost_type': vhost_type,
+                'backend_host': backend_host,
+                'backend_port': bp,
+                'root_directory': root_directory,
+                'max_rps': mr,
+                'learning_mode': lm,
+                'allowlist_ips': allowlist_ips,
+                'allowlist_paths': allowlist_paths,
+                'rules': rules_list
+            })
+
+        with open(_LOCAL_VHOSTS_PATH, 'w', encoding='utf-8') as f:
+            json.dump(vhosts_list, f, indent=4)
+
+        # 2. SQLite backup
+        try:
+            _init_db()
+            conn = sqlite3.connect(_DB_PATH)
+            cur = conn.cursor()
+            db_lm = 1 if lm else 0
+            rules_str = json.dumps(rules_list)
+            cur.execute(
+                """
+                INSERT INTO vhosts (hostname, backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules, vhost_type, root_directory)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(hostname) DO UPDATE SET
+                    backend_host=excluded.backend_host,
+                    backend_port=excluded.backend_port,
+                    max_rps=excluded.max_rps,
+                    learning_mode=excluded.learning_mode,
+                    allowlist_ips=excluded.allowlist_ips,
+                    allowlist_paths=excluded.allowlist_paths,
+                    rules=excluded.rules,
+                    vhost_type=excluded.vhost_type,
+                    root_directory=excluded.root_directory
+                """,
+                (hostname, backend_host, bp, mr, db_lm, allowlist_ips, allowlist_paths, rules_str, vhost_type, root_directory)
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            emit_line(f"[WAF] save_vhost DB backup error: {e}")
+
         return {'status': 'ok'}
     except Exception as e:
         return {'status': 'error', 'error': str(e)}
 
 
 def delete_vhost(hostname: str) -> dict:
+    _init_local_vhosts_file()
+    hostname = hostname.strip()
     try:
-        _init_db()
-        conn = sqlite3.connect(_DB_PATH)
-        cur = conn.cursor()
-        cur.execute("DELETE FROM vhosts WHERE hostname = ?", (hostname,))
-        conn.commit()
-        conn.close()
+        # 1. Delete from JSON
+        if os.path.exists(_LOCAL_VHOSTS_PATH):
+            with open(_LOCAL_VHOSTS_PATH, 'r', encoding='utf-8') as f:
+                vhosts_list = json.load(f)
+            vhosts_list = [vh for vh in vhosts_list if vh.get('hostname', '').strip().lower() != hostname.lower()]
+            with open(_LOCAL_VHOSTS_PATH, 'w', encoding='utf-8') as f:
+                json.dump(vhosts_list, f, indent=4)
+
+        # 2. Delete from DB
+        try:
+            _init_db()
+            conn = sqlite3.connect(_DB_PATH)
+            cur = conn.cursor()
+            cur.execute("DELETE FROM vhosts WHERE hostname = ?", (hostname,))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
         return {'status': 'ok'}
     except Exception as e:
         return {'status': 'error', 'error': str(e)}

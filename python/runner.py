@@ -174,7 +174,9 @@ def dispatch(command: str, kwargs: dict) -> dict:
             learning_mode=kwargs.get('learning_mode', 'false'),
             allowlist_ips=kwargs.get('allowlist_ips', ''),
             allowlist_paths=kwargs.get('allowlist_paths', ''),
-            rules_json=kwargs.get('rules_json', '[]')
+            rules_json=kwargs.get('rules_json', '[]'),
+            vhost_type=kwargs.get('vhost_type', 'proxy'),
+            root_directory=kwargs.get('root_directory', '')
         )
 
     if command == 'waf_delete_vhost':
