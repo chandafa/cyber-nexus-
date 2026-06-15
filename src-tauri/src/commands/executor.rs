@@ -145,6 +145,14 @@ pub async fn run_scan(
     if module == "waf" {
         if let Some(sup) = app.try_state::<crate::commands::monitor::WafSupervisorState>() {
             let mut active_id = sup.active_scan_id.lock().unwrap();
+            
+            // Jika ini manual start (active_scan_id tidak sama dengan scan_id saat ini),
+            // reset counter crash beruntun.
+            let is_manual = active_id.as_ref() != Some(&scan_id);
+            if is_manual {
+                *sup.consecutive_quick_crashes.lock().unwrap() = 0;
+            }
+            
             *active_id = Some(scan_id.clone());
             let mut is_enabled = sup.is_enabled.lock().unwrap();
             *is_enabled = true; // Otomatis aktifkan watchdog saat dijalankan
@@ -154,6 +162,9 @@ pub async fn run_scan(
             *sup.args.lock().unwrap() = Some(args.clone());
             *sup.target.lock().unwrap() = target.clone();
             *sup.mode.lock().unwrap() = mode.clone();
+            
+            // Set startup/restart time untuk mendeteksi crash loop di watchdog
+            *sup.last_restart_time.lock().unwrap() = Some(chrono::Local::now());
             
             let mut logs = sup.logs.lock().unwrap();
             logs.push(format!(

@@ -29,6 +29,8 @@ import { AttackSimulation } from "../pages/AttackSimulation";
 import { DefenseSuite } from "../pages/DefenseSuite";
 import { WAF } from "../pages/WAF";
 import { SystemHealth } from "../pages/SystemHealth";
+import { EbpfSecurity } from "../pages/EbpfSecurity";
+import { HumanElement } from "../pages/HumanElement";
 
 export const router = createHashRouter([
   { path: "/setup", element: <SetupWizard /> },
@@ -38,6 +40,7 @@ export const router = createHashRouter([
     children: [
       { index: true, element: <Dashboard /> },
       { path: "system-health", element: <SystemHealth /> },
+      { path: "ebpf-security", element: <EbpfSecurity /> },
       { path: "port-scanner", element: <PortScanner /> },
       { path: "network-scanner", element: <NetworkScanner /> },
       { path: "vuln-scanner", element: <VulnScanner /> },
@@ -63,6 +66,7 @@ export const router = createHashRouter([
       { path: "attack-simulation", element: <AttackSimulation /> },
       { path: "defense-suite", element: <DefenseSuite /> },
       { path: "waf", element: <WAF /> },
+      { path: "human-element", element: <HumanElement /> },
     ],
   },
 ]);

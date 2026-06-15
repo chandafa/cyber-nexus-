@@ -4,3 +4,4 @@ pub mod executor;
 pub mod report;
 pub mod scanner;
 pub mod monitor;
+pub mod ebpf;

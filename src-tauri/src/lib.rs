@@ -21,6 +21,10 @@ use commands::monitor::{
     get_system_status, get_supervisor_status, set_supervisor_enabled, clear_supervisor_logs,
     SystemMonitorState, WafSupervisorState,
 };
+use commands::ebpf::{
+    get_ebpf_status, get_blocked_ips, block_ip, unblock_ip, get_ids_alerts,
+    clear_ids_alerts, set_ebpf_active, set_ebpf_interface, EbpfState,
+};
 use db::Db;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -33,6 +37,7 @@ pub fn run() {
             sys: Mutex::new(System::new_all()),
         })
         .manage(WafSupervisorState::default())
+        .manage(EbpfState::default())
         .setup(|app| {
             // Inisialisasi database di folder data aplikasi.
             let data_dir = app
@@ -44,43 +49,144 @@ pub fn run() {
             let db = Db::new(&db_path).expect("gagal inisialisasi database");
             app.manage(db);
 
+            // Jalankan Simulator eBPF untuk local development/mocking
+            commands::ebpf::start_ebpf_simulator(app.handle().clone());
+
             // Thread Watchdog Supervisor untuk memantau kesehatan modul WAF
             let app_handle = app.handle().clone();
             std::thread::spawn(move || {
                 loop {
                     std::thread::sleep(std::time::Duration::from_secs(3));
-                    if let Some(sup) = app_handle.try_state::<WafSupervisorState>() {
-                        let is_enabled = {
-                            let val = sup.is_enabled.lock().unwrap();
-                            *val
-                        };
-                        if is_enabled {
-                            let scan_id_opt = {
-                                let val = sup.active_scan_id.lock().unwrap();
-                                val.clone()
+                    
+                    let mut is_enabled = false;
+                    let mut scan_id_opt = None;
+                    
+                    // 1. Get system and supervisor telemetry and emit to frontend
+                    if let (Some(monitor), Some(sup)) = (
+                        app_handle.try_state::<SystemMonitorState>(),
+                        app_handle.try_state::<WafSupervisorState>()
+                    ) {
+                        let system_status = {
+                            let mut monitor_state = monitor.sys.lock().unwrap();
+                            monitor_state.refresh_cpu();
+                            monitor_state.refresh_memory();
+                            
+                            let cpu_usage = monitor_state.global_cpu_info().cpu_usage();
+                            let total_memory = monitor_state.total_memory();
+                            let used_memory = monitor_state.used_memory();
+                            let memory_usage = if total_memory > 0 {
+                                (used_memory as f64 / total_memory as f64) * 100.0
+                            } else {
+                                0.0
                             };
-                            if let Some(scan_id) = scan_id_opt {
-                                let mut is_running = false;
-                                if let Some(reg) = app_handle.try_state::<ScanRegistry>() {
-                                    if let Ok(map) = reg.0.lock() {
-                                        if let Some(child_arc) = map.get(&scan_id) {
-                                            if let Ok(mut child) = child_arc.lock() {
-                                                match child.try_wait() {
-                                                    Ok(None) => {
-                                                        is_running = true;
-                                                    }
-                                                    _ => {
-                                                        is_running = false;
-                                                    }
+                            let uptime = System::uptime();
+                            let os_name = System::name().unwrap_or_else(|| "Unknown".to_string());
+                            let os_version = System::os_version().unwrap_or_else(|| "Unknown".to_string());
+                            let kernel_version = System::kernel_version().unwrap_or_else(|| "Unknown".to_string());
+                            
+                            let disks = sysinfo::Disks::new_with_refreshed_list();
+                            let mut total_disk = 0;
+                            let mut available_disk = 0;
+                            for disk in &disks {
+                                total_disk += disk.total_space();
+                                available_disk += disk.available_space();
+                            }
+                            let disk_usage = if total_disk > 0 {
+                                ((total_disk - available_disk) as f64 / total_disk as f64) * 100.0
+                            } else {
+                                0.0
+                            };
+
+                            serde_json::json!({
+                                "cpu_usage": cpu_usage,
+                                "memory_usage": memory_usage,
+                                "total_memory": total_memory,
+                                "used_memory": used_memory,
+                                "uptime": uptime,
+                                "disk_usage": disk_usage,
+                                "total_disk": total_disk,
+                                "available_disk": available_disk,
+                                "os_name": os_name,
+                                "os_version": os_version,
+                                "kernel_version": kernel_version,
+                            })
+                        };
+
+                        let supervisor_status = {
+                            scan_id_opt = sup.active_scan_id.lock().unwrap().clone();
+                            is_enabled = *sup.is_enabled.lock().unwrap();
+                            let restarts = *sup.auto_restarts.lock().unwrap();
+                            let logs = sup.logs.lock().unwrap().clone();
+                            serde_json::json!({
+                                "active_scan_id": scan_id_opt,
+                                "is_enabled": is_enabled,
+                                "auto_restarts": restarts,
+                                "logs": logs,
+                            })
+                        };
+
+                        app_handle.emit("system-telemetry", serde_json::json!({
+                            "system": system_status,
+                            "supervisor": supervisor_status
+                        })).ok();
+                    }
+
+                    // 2. Perform watchdog check if enabled
+                    if is_enabled {
+                        if let Some(scan_id) = scan_id_opt {
+                            let mut is_running = false;
+                            if let Some(reg) = app_handle.try_state::<ScanRegistry>() {
+                                if let Ok(map) = reg.0.lock() {
+                                    if let Some(child_arc) = map.get(&scan_id) {
+                                        if let Ok(mut child) = child_arc.lock() {
+                                            match child.try_wait() {
+                                                Ok(None) => {
+                                                    is_running = true;
+                                                }
+                                                _ => {
+                                                    is_running = false;
                                                 }
                                             }
                                         }
                                     }
                                 }
+                            }
 
-                                if !is_running {
-                                    // WAF terhenti secara tidak wajar. Lakukan auto-restart!
+                            if !is_running {
+                                if let Some(sup) = app_handle.try_state::<WafSupervisorState>() {
                                     let mut logs = sup.logs.lock().unwrap();
+                                    
+                                    // Watchdog Crash-Loop Breaker
+                                    let mut quick_crash = false;
+                                    let now = chrono::Local::now();
+                                    if let Some(last_time) = *sup.last_restart_time.lock().unwrap() {
+                                        let elapsed = now.signed_duration_since(last_time).num_seconds();
+                                        if elapsed < 5 {
+                                            quick_crash = true;
+                                        }
+                                    }
+
+                                    let consecutive = {
+                                        let mut count = sup.consecutive_quick_crashes.lock().unwrap();
+                                        if quick_crash {
+                                            *count += 1;
+                                        } else {
+                                            *count = 0;
+                                        }
+                                        *count
+                                    };
+
+                                    if consecutive >= 3 {
+                                        *sup.is_enabled.lock().unwrap() = false;
+                                        *sup.consecutive_quick_crashes.lock().unwrap() = 0; // reset
+                                        logs.push(format!(
+                                            "[{}] [CRITICAL] Watchdog disabled: WAF crashed repeatedly during startup. Check port bindings.",
+                                            now.format("%Y-%m-%d %H:%M:%S")
+                                        ));
+                                        continue;
+                                    }
+
+                                    // WAF terhenti secara tidak wajar. Lakukan auto-restart!
                                     let restarts = {
                                         let mut r = sup.auto_restarts.lock().unwrap();
                                         *r += 1;
@@ -88,7 +194,7 @@ pub fn run() {
                                     };
                                     logs.push(format!(
                                         "[{}] [CRITICAL] WAF process terminated unexpectedly (scan_id: {}). Restarting (Attempt #{})...",
-                                        chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                                        now.format("%Y-%m-%d %H:%M:%S"),
                                         scan_id,
                                         restarts
                                     ));
@@ -167,6 +273,15 @@ pub fn run() {
             get_supervisor_status,
             set_supervisor_enabled,
             clear_supervisor_logs,
+            // ebpf security
+            get_ebpf_status,
+            get_blocked_ips,
+            block_ip,
+            unblock_ip,
+            get_ids_alerts,
+            clear_ids_alerts,
+            set_ebpf_active,
+            set_ebpf_interface,
         ])
         .run(tauri::generate_context!())
         .expect("error saat menjalankan aplikasi Nexus");

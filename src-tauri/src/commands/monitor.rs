@@ -19,6 +19,9 @@ pub struct WafSupervisorState {
     pub args: Mutex<Option<Vec<String>>>,
     pub target: Mutex<Option<String>>,
     pub mode: Mutex<Option<String>>,
+    
+    pub last_restart_time: Mutex<Option<chrono::DateTime<chrono::Local>>>,
+    pub consecutive_quick_crashes: Mutex<u32>,
 }
 
 impl Default for WafSupervisorState {
@@ -32,6 +35,8 @@ impl Default for WafSupervisorState {
             args: Mutex::new(None),
             target: Mutex::new(None),
             mode: Mutex::new(None),
+            last_restart_time: Mutex::new(None),
+            consecutive_quick_crashes: Mutex::new(0),
         }
     }
 }

@@ -206,17 +206,20 @@ def _init_db():
                 learning_mode INTEGER DEFAULT 0,
                 allowlist_ips TEXT,
                 allowlist_paths TEXT,
+                blacklist_ips TEXT DEFAULT '',
                 rules TEXT
             )
             """
         )
-        # Migrasi kolom vhost_type & root_directory untuk vhosts
+        # Migrasi kolom vhost_type, root_directory & blacklist_ips untuk vhosts
         cur.execute("PRAGMA table_info(vhosts)")
         cols_vh = [c[1] for c in cur.fetchall()]
         if 'vhost_type' not in cols_vh:
             cur.execute("ALTER TABLE vhosts ADD COLUMN vhost_type TEXT DEFAULT 'proxy'")
         if 'root_directory' not in cols_vh:
             cur.execute("ALTER TABLE vhosts ADD COLUMN root_directory TEXT DEFAULT ''")
+        if 'blacklist_ips' not in cols_vh:
+            cur.execute("ALTER TABLE vhosts ADD COLUMN blacklist_ips TEXT DEFAULT ''")
 
         cur.execute(
             """
@@ -235,7 +238,7 @@ def _init_db():
         emit_line(f"[WAF] DB init error: {e}")
 
 
-def _init_db_and_default_vhost(backend_host: str, backend_port: int, max_rps: int, learning_mode: bool, allowlist_ips: str, allowlist_paths: str):
+def _init_db_and_default_vhost(backend_host: str, backend_port: int, max_rps: int, learning_mode: bool, allowlist_ips: str, allowlist_paths: str, blacklist_ips: str = ""):
     _init_db()
     try:
         conn = sqlite3.connect(_DB_PATH)
@@ -243,21 +246,23 @@ def _init_db_and_default_vhost(backend_host: str, backend_port: int, max_rps: in
         rules_default = json.dumps(["sql_injection", "xss", "path_traversal", "cmd_injection", "scanner_detected"])
         cur.execute(
             """
-            INSERT INTO vhosts (hostname, backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO vhosts (hostname, backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules, blacklist_ips)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(hostname) DO UPDATE SET
                 backend_host=excluded.backend_host,
                 backend_port=excluded.backend_port,
                 max_rps=excluded.max_rps,
                 learning_mode=excluded.learning_mode,
                 allowlist_ips=excluded.allowlist_ips,
-                allowlist_paths=excluded.allowlist_paths
+                allowlist_paths=excluded.allowlist_paths,
+                blacklist_ips=excluded.blacklist_ips
             """,
-            ('*', backend_host, backend_port, max_rps, 1 if learning_mode else 0, allowlist_ips, allowlist_paths, rules_default)
+            ('*', backend_host, backend_port, max_rps, 1 if learning_mode else 0, allowlist_ips, allowlist_paths, rules_default, blacklist_ips)
         )
         conn.commit()
         conn.close()
     except Exception as e:
+        emit_line(f"[WAF] init default vhost error: {e}")
         emit_line(f"[WAF] Gagal inisialisasi default vhost: {e}")
 
 
@@ -289,6 +294,9 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
     allowlist_ips = set()
     allowlist_paths = []
 
+    def version_string(self):
+        return "nginx/1.24.0"
+
     def _log(self, msg: str):
         emit_line(f"[WAF] {msg}")
 
@@ -313,26 +321,33 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
             'learning_mode': self.learning_mode,
             'allowlist_ips': self.allowlist_ips,
             'allowlist_paths': self.allowlist_paths,
+            'blacklist_ips': set(),
             'rules': ["sql_injection", "xss", "path_traversal", "cmd_injection", "scanner_detected"]
         }
-        _init_local_vhosts_file()
+        
+        hostname = hostname.lower()
+
+        # 1. Search in local JSON configuration
         try:
-            # 1. Try JSON configuration file
             if os.path.exists(_LOCAL_VHOSTS_PATH):
+                vhosts_list = []
                 with open(_LOCAL_VHOSTS_PATH, 'r', encoding='utf-8') as f:
-                    vhosts_list = json.load(f)
+                    try:
+                        vhosts_list = json.load(f)
+                    except Exception:
+                        vhosts_list = []
                 
-                # Search exact hostname match
                 match = None
+                # Search exact match
                 for vh in vhosts_list:
-                    if vh.get('hostname', '').lower() == hostname:
+                    if vh.get('hostname', '').strip().lower() == hostname:
                         match = vh
                         break
                 
                 # Search subdomain wildcard match (e.g. *.azharmtq.my.id)
                 if not match:
                     for vh in vhosts_list:
-                        vh_host = vh.get('hostname', '').lower()
+                        vh_host = vh.get('hostname', '').strip().lower()
                         if vh_host.startswith('*.'):
                             suffix = vh_host[2:]
                             if hostname.endswith('.' + suffix) or hostname == suffix:
@@ -349,6 +364,7 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
                 if match:
                     al_ips = match.get('allowlist_ips', '')
                     al_paths = match.get('allowlist_paths', '')
+                    bl_ips = match.get('blacklist_ips', '')
                     return {
                         'vhost_type': match.get('vhost_type', 'proxy'),
                         'backend_host': match.get('backend_host', '127.0.0.1'),
@@ -358,6 +374,7 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
                         'learning_mode': bool(match.get('learning_mode', False)),
                         'allowlist_ips': {ip.strip() for ip in al_ips.split(",") if ip.strip()} if isinstance(al_ips, str) else set(),
                         'allowlist_paths': [p.strip() for p in al_paths.split(",") if p.strip()] if isinstance(al_paths, str) else [],
+                        'blacklist_ips': {ip.strip() for ip in bl_ips.split(",") if ip.strip()} if isinstance(bl_ips, str) else set(),
                         'rules': match.get('rules', [])
                     }
         except Exception as e:
@@ -367,7 +384,7 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
         try:
             conn = sqlite3.connect(_DB_PATH)
             cur = conn.cursor()
-            cur.execute("SELECT hostname, backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules, vhost_type, root_directory FROM vhosts")
+            cur.execute("SELECT hostname, backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules, vhost_type, root_directory, blacklist_ips FROM vhosts")
             rows = cur.fetchall()
             conn.close()
 
@@ -396,7 +413,7 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
                         break
 
             if match_row:
-                hn, bh, bp, mr, lm, al_ips, al_paths, r_str, vh_type, root_dir = match_row
+                hn, bh, bp, mr, lm, al_ips, al_paths, r_str, vh_type, root_dir, bl_ips = match_row
                 try:
                     rules_list = json.loads(r_str) if r_str else []
                 except Exception:
@@ -410,6 +427,7 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
                     'learning_mode': bool(lm),
                     'allowlist_ips': {ip.strip() for ip in al_ips.split(",") if ip.strip()} if al_ips else set(),
                     'allowlist_paths': [p.strip() for p in al_paths.split(",") if p.strip()] if al_paths else [],
+                    'blacklist_ips': {ip.strip() for ip in bl_ips.split(",") if ip.strip()} if bl_ips else set(),
                     'rules': rules_list
                 }
         except Exception:
@@ -537,8 +555,23 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
         max_rps = config['max_rps']
         learning_mode = config['learning_mode']
         allowlist_ips = config['allowlist_ips']
-        allowlist_paths = config['allowlist_paths']
         enabled_rules_list = config['rules']
+
+        # Check IP blacklist
+        blacklist_ips = config.get('blacklist_ips', set())
+        if ip in blacklist_ips:
+            self.send_response(403)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.end_headers()
+            ts = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
+            err_body = HTML_BLOCK_TEMPLATE.format(rule='ip_blacklisted', ip=ip, path=decoded_path, ts=ts)
+            self.wfile.write(err_body.encode('utf-8'))
+            self._log(f"{ip} -> 403 blocked by IP Blacklist")
+            try:
+                log_event(ip, 'ip_blacklisted', decoded_path, decoded_body, headers_text)
+            except Exception:
+                pass
+            return
 
         # Check IP allowlist
         if ip in allowlist_ips:
@@ -1171,6 +1204,7 @@ def get_vhosts() -> dict:
                         'learning_mode': bool(vh.get('learning_mode', False)),
                         'allowlist_ips': vh.get('allowlist_ips', ''),
                         'allowlist_paths': vh.get('allowlist_paths', ''),
+                        'blacklist_ips': vh.get('blacklist_ips', ''),
                         'rules': vh.get('rules', [])
                     })
                     seen_hostnames.add(hostname.lower())
@@ -1182,7 +1216,7 @@ def get_vhosts() -> dict:
         _init_db()
         conn = sqlite3.connect(_DB_PATH)
         cur = conn.cursor()
-        cur.execute("SELECT id, hostname, backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules, vhost_type, root_directory FROM vhosts")
+        cur.execute("SELECT id, hostname, backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules, vhost_type, root_directory, blacklist_ips FROM vhosts")
         rows = cur.fetchall()
         conn.close()
         for r in rows:
@@ -1199,6 +1233,7 @@ def get_vhosts() -> dict:
                     'learning_mode': bool(r[5]),
                     'allowlist_ips': r[6] or "",
                     'allowlist_paths': r[7] or "",
+                    'blacklist_ips': r[11] or "",
                     'rules': json.loads(r[8]) if r[8] else []
                 })
                 seen_hostnames.add(hostname.lower())
@@ -1210,7 +1245,7 @@ def get_vhosts() -> dict:
 
 def save_vhost(hostname: str, backend_host: str, backend_port: str, max_rps: str,
                learning_mode: str, allowlist_ips: str, allowlist_paths: str, rules_json: str,
-               vhost_type: str = 'proxy', root_directory: str = '') -> dict:
+               vhost_type: str = 'proxy', root_directory: str = '', blacklist_ips: str = '') -> dict:
     _init_local_vhosts_file()
     try:
         hostname = hostname.strip()
@@ -1242,6 +1277,7 @@ def save_vhost(hostname: str, backend_host: str, backend_port: str, max_rps: str
                     'learning_mode': lm,
                     'allowlist_ips': allowlist_ips,
                     'allowlist_paths': allowlist_paths,
+                    'blacklist_ips': blacklist_ips,
                     'rules': rules_list
                 }
                 found = True
@@ -1259,6 +1295,7 @@ def save_vhost(hostname: str, backend_host: str, backend_port: str, max_rps: str
                 'learning_mode': lm,
                 'allowlist_ips': allowlist_ips,
                 'allowlist_paths': allowlist_paths,
+                'blacklist_ips': blacklist_ips,
                 'rules': rules_list
             })
 
@@ -1274,8 +1311,8 @@ def save_vhost(hostname: str, backend_host: str, backend_port: str, max_rps: str
             rules_str = json.dumps(rules_list)
             cur.execute(
                 """
-                INSERT INTO vhosts (hostname, backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules, vhost_type, root_directory)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO vhosts (hostname, backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules, vhost_type, root_directory, blacklist_ips)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(hostname) DO UPDATE SET
                     backend_host=excluded.backend_host,
                     backend_port=excluded.backend_port,
@@ -1285,9 +1322,10 @@ def save_vhost(hostname: str, backend_host: str, backend_port: str, max_rps: str
                     allowlist_paths=excluded.allowlist_paths,
                     rules=excluded.rules,
                     vhost_type=excluded.vhost_type,
-                    root_directory=excluded.root_directory
+                    root_directory=excluded.root_directory,
+                    blacklist_ips=excluded.blacklist_ips
                 """,
-                (hostname, backend_host, bp, mr, db_lm, allowlist_ips, allowlist_paths, rules_str, vhost_type, root_directory)
+                (hostname, backend_host, bp, mr, db_lm, allowlist_ips, allowlist_paths, rules_str, vhost_type, root_directory, blacklist_ips)
             )
             conn.commit()
             conn.close()

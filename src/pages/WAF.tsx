@@ -366,10 +366,120 @@ const WafDashboard: React.FC<{ logs: LogEvent[]; stats: any | null }> = ({ logs,
   );
 };
 
+interface WafLogsTabProps {
+  logs: LogEvent[];
+  onClear: () => void;
+  onDownload: () => void;
+  onSelectLog: (log: LogEvent) => void;
+}
+
+const WafLogsTab: React.FC<WafLogsTabProps> = ({ logs, onClear, onDownload, onSelectLog }) => {
+  const [scrollTop, setScrollTop] = useState(0);
+  const rowHeight = 28;
+  const viewportHeight = 350; // Taller since it is in the main tab area
+  const startIndex = Math.max(0, Math.floor(scrollTop / rowHeight) - 2);
+  const endIndex = Math.min(logs.length, Math.floor((scrollTop + viewportHeight) / rowHeight) + 2);
+  const visibleLogs = logs.slice(startIndex, endIndex);
+  const topPadding = startIndex * rowHeight;
+  const bottomPadding = (logs.length - endIndex) * rowHeight;
+
+  return (
+    <div className="nx-card p-5 space-y-4">
+      <div className="flex justify-between items-center pb-2 border-b border-nexus-hairline">
+        <div>
+          <h3 className="text-sm font-semibold text-nexus-text font-mono">Daftar Serangan & Deteksi Log</h3>
+          <p className="text-[11px] text-nexus-muted mt-0.5">Menampilkan 200 kejadian keamanan terbaru yang diblokir atau dideteksi. Klik salah satu baris untuk melihat detail payload lengkap.</p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            className="text-[11px] text-red-400 hover:text-red-500 font-semibold border border-nexus-border hover:border-red-950/40 rounded px-2 py-1 flex items-center gap-1 transition-all"
+            onClick={onClear}
+          >
+            <Ic.trash className="h-3 w-3" /> Hapus Semua Log
+          </button>
+          <button
+            className="text-[11px] text-nexus-accent hover:brightness-115 font-semibold border border-nexus-border hover:border-nexus-accent/30 rounded px-2 py-1 flex items-center gap-1 transition-all"
+            onClick={onDownload}
+          >
+            <Ic.download className="h-3 w-3" /> Unduh CSV
+          </button>
+        </div>
+      </div>
+      <div 
+        onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+        className="overflow-auto max-h-[350px] rounded border border-nexus-hairline"
+      >
+        <table className="w-full table-fixed min-w-[950px] text-xs">
+          <thead className="bg-nexus-panel text-left text-xs text-nexus-muted sticky top-0 z-10 border-b border-nexus-hairline">
+            <tr>
+              <th className="px-2 py-1.5 w-[140px]">Waktu</th>
+              <th className="px-2 py-1.5 w-[110px]">IP Klien</th>
+              <th className="px-2 py-1.5 w-[80px]">Negara</th>
+              <th className="px-2 py-1.5 w-[170px]">Aturan Terpicu</th>
+              <th className="px-2 py-1.5">Requested Path</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-nexus-hairline text-nexus-text font-mono">
+            {logs.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="text-center py-6 text-nexus-subtle italic">
+                  Belum ada log serangan yang terdeteksi.
+                </td>
+              </tr>
+            ) : (
+              <>
+                {topPadding > 0 && (
+                  <tr style={{ height: `${topPadding}px` }}>
+                    <td colSpan={5} style={{ padding: 0 }} />
+                  </tr>
+                )}
+                {visibleLogs.map((l, idx) => {
+                  const absoluteIndex = startIndex + idx;
+                  const isBlocked = !l.rule.startsWith("allow:") && !l.rule.startsWith("detect:");
+                  const isDetected = l.rule.startsWith("detect:");
+                  return (
+                    <tr
+                      key={absoluteIndex}
+                      onClick={() => onSelectLog(l)}
+                      style={{ height: `${rowHeight}px` }}
+                      className={`cursor-pointer hover:bg-nexus-panel/60 transition-colors ${
+                        isBlocked
+                          ? "bg-red-950/20 text-red-200"
+                          : isDetected
+                          ? "bg-yellow-950/20 text-yellow-200"
+                          : "odd:bg-white/5 even:bg-transparent"
+                      }`}
+                    >
+                      <td className="px-2 py-1 font-mono text-[11px] truncate">{l.ts}</td>
+                      <td className="px-2 py-1 text-[11.5px] truncate">{l.ip}</td>
+                      <td className="px-2 py-1 text-[11.5px] truncate">
+                        <span className="mr-1">{getFlagEmoji(l.country_code)}</span>
+                        <span className="text-[10px] text-nexus-muted font-mono">{l.country_code || "ID"}</span>
+                      </td>
+                      <td className="px-2 py-1 text-[11.5px] font-semibold truncate" title={l.rule}>{l.rule}</td>
+                      <td className="px-2 py-1 truncate text-[11px]" title={`Path: ${l.path}\nPayload: ${l.payload || '-'}`}>{l.path}</td>
+                    </tr>
+                  );
+                })}
+                {bottomPadding > 0 && (
+                  <tr style={{ height: `${bottomPadding}px` }}>
+                    <td colSpan={5} style={{ padding: 0 }} />
+                  </tr>
+                )}
+              </>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
 const WafVhostTab: React.FC<{
   vhosts: any[];
   onDelete: (hostname: string) => void;
-}> = ({ vhosts, onDelete }) => {
+  onEdit: (vhost: any) => void;
+}> = ({ vhosts, onDelete, onEdit }) => {
   const [search, setSearch] = useState("");
 
   const filtered = vhosts.filter((vh) =>
@@ -464,15 +574,24 @@ const WafVhostTab: React.FC<{
                     </div>
                   </td>
                   <td className="p-3.5 text-right">
-                    <button
-                      type="button"
-                      onClick={() => onDelete(vh.hostname)}
-                      className="text-red-400 hover:text-red-500 font-bold px-2.5 py-1 rounded border border-red-900/40 hover:border-red-900 bg-red-950/10 hover:bg-red-950/30 transition-all"
-                    >
-                      <span className="flex items-center gap-1.5">
-                        <Ic.trash className="h-3 w-3" /> Hapus
-                      </span>
-                    </button>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onEdit(vh)}
+                        className="text-nexus-accent hover:text-nexus-accent/80 font-semibold px-2 py-0.5 rounded border border-nexus-border hover:border-nexus-accent bg-nexus-panel/40 hover:bg-nexus-accent/10 transition-all text-[11px]"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDelete(vh.hostname)}
+                        className="text-red-400 hover:text-red-500 font-bold px-2.5 py-1 rounded border border-red-900/40 hover:border-red-900 bg-red-950/10 hover:bg-red-950/30 transition-all"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <Ic.trash className="h-3 w-3" /> Hapus
+                        </span>
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))
@@ -602,6 +721,7 @@ export const WAF: React.FC = () => {
   const [learningMode, setLearningMode] = useState(false);
   const [allowlistIps, setAllowlistIps] = useState("");
   const [allowlistPaths, setAllowlistPaths] = useState("");
+  const [blacklistIps, setBlacklistIps] = useState("");
 
   // SSL settings
   const [sslEnabled, setSslEnabled] = useState(false);
@@ -617,7 +737,6 @@ export const WAF: React.FC = () => {
 
   const [logs, setLogs] = useState<any[]>([]);
   const [stats, setStats] = useState<any | null>(null);
-  const [showLogs, setShowLogs] = useState(true);
   const [selectedLog, setSelectedLog] = useState<any | null>(null);
 
   // VHosts state
@@ -629,6 +748,8 @@ export const WAF: React.FC = () => {
   const [newVhostLearning, setNewVhostLearning] = useState(false);
   const [newVhostIps, setNewVhostIps] = useState("");
   const [newVhostPaths, setNewVhostPaths] = useState("");
+  const [newVhostBlacklistIps, setNewVhostBlacklistIps] = useState("");
+  const [editingVhostId, setEditingVhostId] = useState<number | null>(null);
   const [newVhostType, setNewVhostType] = useState<"proxy" | "static">("proxy");
   const [newVhostRootDir, setNewVhostRootDir] = useState("");
   const [selectedRules, setSelectedRules] = useState<string[]>([
@@ -655,6 +776,7 @@ export const WAF: React.FC = () => {
         learning_mode: learningMode,
         allowlist_ips: allowlistIps,
         allowlist_paths: allowlistPaths,
+        blacklist_ips: blacklistIps,
         ssl_enabled: sslEnabled,
         ssl_cert_type: sslCertType,
         ssl_cert_path: sslCertPath,
@@ -706,6 +828,7 @@ export const WAF: React.FC = () => {
         learning_mode: newVhostLearning,
         allowlist_ips: newVhostIps,
         allowlist_paths: newVhostPaths,
+        blacklist_ips: newVhostBlacklistIps,
         rules_json: JSON.stringify(selectedRules),
         vhost_type: newVhostType,
         root_directory: newVhostRootDir
@@ -713,11 +836,43 @@ export const WAF: React.FC = () => {
       setNewVhostHost("");
       setNewVhostIps("");
       setNewVhostPaths("");
+      setNewVhostBlacklistIps("");
       setNewVhostRootDir("");
+      setEditingVhostId(null);
       fetchVhosts();
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const handleEditVhost = (vh: any) => {
+    setEditingVhostId(vh.id);
+    setNewVhostHost(vh.hostname);
+    setNewVhostBackend(vh.backend_host);
+    setNewVhostPort(String(vh.backend_port));
+    setNewVhostRps(String(vh.max_rps));
+    setNewVhostLearning(vh.learning_mode);
+    setNewVhostIps(vh.allowlist_ips || "");
+    setNewVhostPaths(vh.allowlist_paths || "");
+    setNewVhostBlacklistIps(vh.blacklist_ips || "");
+    setNewVhostType(vh.vhost_type || "proxy");
+    setNewVhostRootDir(vh.root_directory || "");
+    setSelectedRules(vh.rules || []);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingVhostId(null);
+    setNewVhostHost("");
+    setNewVhostBackend("127.0.0.1");
+    setNewVhostPort("8000");
+    setNewVhostRps("10");
+    setNewVhostLearning(false);
+    setNewVhostIps("");
+    setNewVhostPaths("");
+    setNewVhostBlacklistIps("");
+    setNewVhostType("proxy");
+    setNewVhostRootDir("");
+    setSelectedRules(["sql_injection", "xss", "path_traversal", "cmd_injection", "scanner_detected"]);
   };
 
   const handleDeleteVhost = async (hostname: string) => {
@@ -966,6 +1121,18 @@ export const WAF: React.FC = () => {
                   placeholder="e.g. /assets, /api/public"
                 />
               </div>
+              <div>
+                <label className="nx-label">
+                  Blacklist IPs
+                  <HelpTip text="Daftar IP (dipisah koma) yang diblokir aksesnya secara permanen ke WAF." />
+                </label>
+                <input
+                  className="nx-input font-mono text-xs"
+                  value={blacklistIps}
+                  onChange={(e) => setBlacklistIps(e.target.value)}
+                  placeholder="e.g. 192.168.1.55, 45.227.254.10"
+                />
+              </div>
             </div>
 
             {/* SSL/TLS termination configs */}
@@ -1031,7 +1198,9 @@ export const WAF: React.FC = () => {
         {activeTab === "vhosts" && (
           <div className="space-y-4">
             <div className="border border-nexus-hairline p-3 rounded bg-nexus-panel/50 space-y-3">
-              <h4 className="text-xs font-semibold text-nexus-text">Add / Edit Virtual Host</h4>
+              <h4 className="text-xs font-semibold text-nexus-text">
+                {editingVhostId !== null ? `Edit Virtual Host: ${newVhostHost}` : "Add / Edit Virtual Host"}
+              </h4>
               <div>
                 <label className="nx-label">
                   Hostname (Domain)
@@ -1126,6 +1295,15 @@ export const WAF: React.FC = () => {
                   placeholder="e.g. /public"
                 />
               </div>
+              <div>
+                <label className="nx-label">Blacklist IPs (comma-separated)</label>
+                <input
+                  className="nx-input font-mono text-xs"
+                  value={newVhostBlacklistIps}
+                  onChange={(e) => setNewVhostBlacklistIps(e.target.value)}
+                  placeholder="e.g. 45.227.254.10"
+                />
+              </div>
 
               <div>
                 <label className="nx-label">Enabled Rule Packages</label>
@@ -1161,13 +1339,24 @@ export const WAF: React.FC = () => {
                 </div>
               </div>
 
-              <button
-                type="button"
-                className="nx-btn-primary w-full py-1"
-                onClick={handleSaveVhost}
-              >
-                Save Virtual Host
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="nx-btn-primary flex-1 py-1"
+                  onClick={handleSaveVhost}
+                >
+                  {editingVhostId !== null ? "Update Host" : "Save Virtual Host"}
+                </button>
+                {editingVhostId !== null && (
+                  <button
+                    type="button"
+                    className="nx-btn-ghost py-1 px-3 border border-nexus-border hover:bg-nexus-elevated"
+                    onClick={handleCancelEdit}
+                  >
+                    Batal
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* VHosts List has been moved to main tab area */}
@@ -1243,11 +1432,11 @@ export const WAF: React.FC = () => {
           </button>
 
           <div className="grid grid-cols-2 gap-2">
-            <button className="nx-btn-ghost w-full py-1 text-xs" onClick={fetchLogs}>
-              <Ic.refresh className="h-3.5 w-3.5" /> Refresh Logs
+            <button className="nx-btn-ghost w-full py-1 text-xs" onClick={downloadLogsCsv}>
+              <Ic.download className="h-3.5 w-3.5" /> Download CSV
             </button>
-            <button className="nx-btn-ghost w-full py-1 text-xs" onClick={() => setShowLogs(!showLogs)}>
-              <Ic.log className="h-3.5 w-3.5" /> {showLogs ? "Hide Logs" : "Show Logs"}
+            <button className="nx-btn-ghost w-full py-1 text-xs text-red-400 hover:text-red-500 hover:border-red-900/50" onClick={handleClearLogs}>
+              <Ic.trash className="h-3.5 w-3.5" /> Clear Logs
             </button>
           </div>
         </div>
@@ -1271,9 +1460,14 @@ export const WAF: React.FC = () => {
             render: () => <WafDashboard logs={logs} stats={stats} />
           },
           {
+            id: "logs",
+            label: "Log Serangan",
+            render: () => <WafLogsTab logs={logs} onClear={handleClearLogs} onDownload={downloadLogsCsv} onSelectLog={setSelectedLog} />
+          },
+          {
             id: "vhosts",
             label: "Virtual Hosts",
-            render: () => <WafVhostTab vhosts={vhosts} onDelete={handleDeleteVhost} />
+            render: () => <WafVhostTab vhosts={vhosts} onDelete={handleDeleteVhost} onEdit={handleEditVhost} />
           },
           {
             id: "rules",
@@ -1282,82 +1476,7 @@ export const WAF: React.FC = () => {
           }
         ]}
       />
-      {showLogs && (
-        <div className="p-4 bg-nexus-surface border-t border-nexus-hairline">
-          <div className="flex justify-between items-center mb-2">
-            <h3 className="font-semibold text-nexus-text">WAF Logs (recent events)</h3>
-            <div className="flex gap-2">
-              <button
-                className="text-xs text-red-400 hover:text-red-500 font-semibold flex items-center gap-1"
-                onClick={handleClearLogs}
-              >
-                <Ic.trash className="h-3 w-3" /> Clear Logs
-              </button>
-              <button
-                className="text-xs text-nexus-accent hover:brightness-115 font-semibold flex items-center gap-1"
-                onClick={downloadLogsCsv}
-              >
-                <Ic.download className="h-3 w-3" /> Download Log (CSV)
-              </button>
-              <button
-                className="text-xs text-nexus-accent hover:brightness-115 font-semibold"
-                onClick={fetchLogs}
-              >
-                Force Refresh
-              </button>
-            </div>
-          </div>
-          <div className="overflow-auto max-h-64 rounded border border-nexus-hairline">
-            <table className="w-full table-fixed min-w-[950px] text-xs">
-              <thead className="bg-nexus-panel text-left text-xs text-nexus-muted">
-                <tr>
-                  <th className="px-2 py-1.5 w-[140px]">Time</th>
-                  <th className="px-2 py-1.5 w-[110px]">Client IP</th>
-                  <th className="px-2 py-1.5 w-[80px]">Country</th>
-                  <th className="px-2 py-1.5 w-[170px]">Triggered Rule</th>
-                  <th className="px-2 py-1.5">Requested Path</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-nexus-hairline text-nexus-text font-mono">
-                {logs.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="text-center py-4 text-nexus-subtle italic">
-                      No matching log events captured.
-                    </td>
-                  </tr>
-                ) : (
-                  logs.map((l, i) => {
-                    const isBlocked = !l.rule.startsWith("allow:") && !l.rule.startsWith("detect:");
-                    const isDetected = l.rule.startsWith("detect:");
-                    return (
-                      <tr
-                        key={i}
-                        onClick={() => setSelectedLog(l)}
-                        className={`cursor-pointer hover:bg-nexus-panel/60 transition-colors ${
-                          isBlocked
-                            ? "bg-red-950/20 text-red-200"
-                            : isDetected
-                            ? "bg-yellow-950/20 text-yellow-200"
-                            : "odd:bg-white/5 even:bg-transparent"
-                        }`}
-                      >
-                        <td className="px-2 py-1 font-mono text-[11px]">{l.ts}</td>
-                        <td className="px-2 py-1 text-[11.5px]">{l.ip}</td>
-                        <td className="px-2 py-1 text-[11.5px]">
-                          <span className="mr-1">{getFlagEmoji(l.country_code)}</span>
-                          <span className="text-[10px] text-nexus-muted font-mono">{l.country_code || "ID"}</span>
-                        </td>
-                        <td className="px-2 py-1 text-[11.5px] font-semibold truncate" title={l.rule}>{l.rule}</td>
-                        <td className="px-2 py-1 truncate text-[11px]" title={`Path: ${l.path}\nPayload: ${l.payload || '-'}`}>{l.path}</td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+
       {selectedLog && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-nexus-elevated border border-nexus-border rounded-xl w-full max-w-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">

@@ -46,22 +46,35 @@ export const SystemHealth: React.FC = () => {
   };
 
   useEffect(() => {
+    // Ambil data awal langsung saat mount agar tidak kosong
     fetchData();
-    const interval = setInterval(fetchData, 2000);
-    return () => clearInterval(interval);
-  }, []);
 
-  // Listen to WAF auto-restarts to update immediately
-  useEffect(() => {
-    let unlisten: any;
-    const setupListener = async () => {
-      unlisten = await listen("waf-watchdog-restart", () => {
+    // Dengar update real-time dari thread Rust background (mengurangi IPC Roundtrips / Polling)
+    let unlistenTelemetry: any;
+    const setupTelemetryListener = async () => {
+      unlistenTelemetry = await listen<{ system: SystemStatus; supervisor: SupervisorStatus }>(
+        "system-telemetry",
+        (event) => {
+          setSysStatus(event.payload.system);
+          setSupStatus(event.payload.supervisor);
+          setLoading(false);
+        }
+      );
+    };
+    setupTelemetryListener();
+
+    // Dengar event auto-restart watchdog untuk meresegarkan log
+    let unlistenRestart: any;
+    const setupRestartListener = async () => {
+      unlistenRestart = await listen("waf-watchdog-restart", () => {
         fetchData();
       });
     };
-    setupListener();
+    setupRestartListener();
+
     return () => {
-      if (unlisten) unlisten();
+      if (unlistenTelemetry) unlistenTelemetry();
+      if (unlistenRestart) unlistenRestart();
     };
   }, []);
 
