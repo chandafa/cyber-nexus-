@@ -35,6 +35,10 @@ wordlists/rockyou_full.txt
 *.log
 build.exit
 
+# Certificates
+python/modules/waf_cert.pem
+python/modules/waf_key.pem
+
 # Tauri updater signing keys — RAHASIA, jangan pernah commit private key.
 # Public key (.pub) boleh ditaruh di tauri.conf.json; private key masuk GitHub Secret.
 .tauri-keys/

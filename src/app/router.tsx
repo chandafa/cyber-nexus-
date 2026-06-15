@@ -13,6 +13,7 @@ import { DefenseMonitor } from "../pages/DefenseMonitor";
 import { ReportGenerator } from "../pages/ReportGenerator";
 import { History } from "../pages/History";
 import { Settings } from "../pages/Settings";
+
 // SDD v2
 import { SslAuditor } from "../pages/SslAuditor";
 import { ExploitLookup } from "../pages/ExploitLookup";
@@ -27,6 +28,8 @@ import { WordlistManager } from "../pages/WordlistManager";
 import { Scheduler } from "../pages/Scheduler";
 import { AttackSimulation } from "../pages/AttackSimulation";
 import { DefenseSuite } from "../pages/DefenseSuite";
+import { WAF } from "../pages/WAF";
+
 // Terminal interaktif + modul baru
 import { Shell } from "../pages/Shell";
 import { DnsRecon } from "../pages/DnsRecon";
@@ -51,6 +54,7 @@ export const router = createHashRouter([
       { path: "report", element: <ReportGenerator /> },
       { path: "history", element: <History /> },
       { path: "settings", element: <Settings /> },
+
       // SDD v2
       { path: "ssl-auditor", element: <SslAuditor /> },
       { path: "exploit-lookup", element: <ExploitLookup /> },
@@ -65,6 +69,8 @@ export const router = createHashRouter([
       { path: "scheduler", element: <Scheduler /> },
       { path: "attack-simulation", element: <AttackSimulation /> },
       { path: "defense-suite", element: <DefenseSuite /> },
+      { path: "waf", element: <WAF /> },
+
       // Terminal interaktif + modul baru
       { path: "terminal", element: <Shell /> },
       { path: "dns-recon", element: <DnsRecon /> },
