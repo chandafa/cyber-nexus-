@@ -132,3 +132,69 @@ pub fn clear_supervisor_logs(
     logs.push("[SYSTEM] Supervisor logs cleared.".to_string());
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_supervisor_state_default() {
+        let state = WafSupervisorState::default();
+        assert_eq!(*state.is_enabled.lock().unwrap(), false);
+        assert_eq!(*state.auto_restarts.lock().unwrap(), 0);
+        assert_eq!(state.active_scan_id.lock().unwrap().is_none(), true);
+        assert_eq!(state.logs.lock().unwrap().len(), 1);
+        assert_eq!(state.logs.lock().unwrap()[0], "[SYSTEM] Supervisor initialized.");
+    }
+
+    #[test]
+    fn test_supervisor_state_mutation() {
+        let state = WafSupervisorState::default();
+        
+        // Test enabling/disabling
+        {
+            let mut is_enabled = state.is_enabled.lock().unwrap();
+            *is_enabled = true;
+        }
+        assert_eq!(*state.is_enabled.lock().unwrap(), true);
+
+        // Test auto-restarts increment
+        {
+            let mut restarts = state.auto_restarts.lock().unwrap();
+            *restarts += 1;
+        }
+        assert_eq!(*state.auto_restarts.lock().unwrap(), 1);
+
+        // Test active scan ID update
+        {
+            let mut active_id = state.active_scan_id.lock().unwrap();
+            *active_id = Some("test-scan-id-123".to_string());
+        }
+        assert_eq!(state.active_scan_id.lock().unwrap().as_deref(), Some("test-scan-id-123"));
+    }
+
+    #[test]
+    fn test_supervisor_logs() {
+        let state = WafSupervisorState::default();
+        
+        {
+            let mut logs = state.logs.lock().unwrap();
+            logs.push("First log".to_string());
+            logs.push("Second log".to_string());
+        }
+        
+        assert_eq!(state.logs.lock().unwrap().len(), 3);
+        assert_eq!(state.logs.lock().unwrap()[1], "First log");
+        
+        // Clear logs
+        {
+            let mut logs = state.logs.lock().unwrap();
+            logs.clear();
+            logs.push("[SYSTEM] Supervisor logs cleared.".to_string());
+        }
+        
+        assert_eq!(state.logs.lock().unwrap().len(), 1);
+        assert_eq!(state.logs.lock().unwrap()[0], "[SYSTEM] Supervisor logs cleared.");
+    }
+}
+
