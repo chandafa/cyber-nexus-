@@ -22,10 +22,28 @@ const PROGRESS_SENTINEL: &str = "__NEXUS_PROGRESS__";
 #[derive(Default, Clone)]
 pub struct ScanRegistry(pub Arc<Mutex<HashMap<String, Arc<Mutex<Child>>>>>);
 
-/// Pilih executable python yang sesuai OS.
-pub fn python_exe() -> String {
+/// Pilih executable python untuk menjalankan engine.
+///
+/// PRIORITAS (kritis untuk portabilitas — agar .exe jalan di komputer lain
+/// tanpa perlu menginstal Python):
+///   1. Runtime Python yang DI-BUNDLE bersama aplikasi (`<root>/python-runtime/`),
+///      disiapkan oleh CI/CD (`scripts/prepare-python-runtime.ps1`).
+///   2. Fallback: interpreter Python dari PATH host (mode dev / build manual).
+pub fn python_exe(root: &std::path::Path) -> String {
+    // 1. Runtime bundel — dicari relatif terhadap folder yang berisi `python/`.
+    //    Saat di-bundle Tauri, resource `../python-runtime` ditaruh di `_up_/`,
+    //    sehingga `root` (= base hasil resolve_runner) sudah menunjuk ke sana.
+    let bundled = if cfg!(windows) {
+        root.join("python-runtime").join("python.exe")
+    } else {
+        root.join("python-runtime").join("bin").join("python3")
+    };
+    if bundled.exists() {
+        return bundled.to_string_lossy().into_owned();
+    }
+
+    // 2. Fallback ke interpreter host.
     if cfg!(windows) {
-        // `python` lebih umum di Windows; fallback py launcher.
         for c in ["python", "python3", "py"] {
             if which(c) {
                 return c.to_string();
@@ -114,7 +132,7 @@ pub fn run_python_blocking(
     args: &[String],
 ) -> Result<Value, String> {
     let (runner, root) = resolve_runner(app)?;
-    let mut cmd = Command::new(python_exe());
+    let mut cmd = Command::new(python_exe(&root));
     cmd.arg("-u")
         .arg(&runner)
         .arg(command)
@@ -161,7 +179,7 @@ pub async fn run_scan(
     // Kita perlu akses Db di thread; State tidak Send. Ambil pointer via app state.
     let app_for_thread = app.clone();
 
-    let mut spawn_cmd = Command::new(python_exe());
+    let mut spawn_cmd = Command::new(python_exe(&root));
     spawn_cmd
         .arg("-u")
         .arg(&runner)

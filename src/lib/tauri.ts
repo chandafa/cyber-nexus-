@@ -96,6 +96,42 @@ export async function stopScan(scanId: string): Promise<void> {
   await invoke("stop_scan", { scanId });
 }
 
+// ------------------------------------------------- terminal interaktif (PTY)
+
+export interface PtyOutput {
+  id: string;
+  data: string;
+}
+
+/** Buka sesi terminal interaktif (shell sungguhan) di backend. */
+export async function ptyOpen(id: string, cols: number, rows: number, shell?: string) {
+  return invoke("pty_open", { id, cols, rows, shell: shell ?? null });
+}
+/** Kirim ketikan/perintah ke shell. */
+export async function ptyWrite(id: string, data: string) {
+  return invoke("pty_write", { id, data });
+}
+/** Sesuaikan ukuran terminal. */
+export async function ptyResize(id: string, cols: number, rows: number) {
+  return invoke("pty_resize", { id, cols, rows });
+}
+/** Tutup & matikan sesi terminal. */
+export async function ptyClose(id: string) {
+  return invoke("pty_close", { id });
+}
+/** Dengarkan output shell. Kembalikan fungsi unlisten. */
+export async function onPtyOutput(id: string, cb: (data: string) => void): Promise<UnlistenFn> {
+  return listen<PtyOutput>("pty-output", (e) => {
+    if (e.payload.id === id) cb(e.payload.data);
+  });
+}
+/** Dengarkan event shell selesai. Kembalikan fungsi unlisten. */
+export async function onPtyExit(id: string, cb: () => void): Promise<UnlistenFn> {
+  return listen<{ id: string }>("pty-exit", (e) => {
+    if (e.payload.id === id) cb();
+  });
+}
+
 /** Bangun list argumen `--key value` dari objek. */
 export function buildArgs(obj: Record<string, string | number | boolean | undefined>): string[] {
   const out: string[] = [];

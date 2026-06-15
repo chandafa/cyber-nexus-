@@ -56,6 +56,11 @@ def run(findings: str = '', **kwargs) -> dict:
     if not data:
         data = _load_findings()
     if not data:
+        from core.subprocess_runner import demo_disabled
+        if demo_disabled():
+            cb('[REAL] Belum ada temuan tersimpan — jalankan vuln/container scan '
+               'dulu. Mode eksekusi nyata: contoh palsu tidak ditampilkan.')
+            return {'module': 'patch', 'advisories': [], 'total': 0}
         cb('[DEMO] Tidak ada temuan tersimpan — contoh patch advisory.')
         data = [
             {'package': 'openssl', 'installed_version': '1.1.1n', 'fixed_version': '1.1.1t',

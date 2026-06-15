@@ -1,0 +1,87 @@
+name: Release
+
+# Build installer Windows (.exe NSIS + .msi) yang BENAR-BENAR PORTABEL
+# (Python runtime di-bundle, WebView2 bootstrapper disertakan) lalu otomatis
+# membuat GitHub Release berisi artifact-nya.
+#
+# Pemicu:
+#   - push tag `v*`         → rilis final dengan tag tsb.
+#   - workflow_dispatch     → rilis manual (isi input `tag`).
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag rilis (mis. v1.0.1)"
+        required: true
+        default: "v1.0.0"
+
+permissions:
+  contents: write # diperlukan tauri-action untuk membuat release & upload aset
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Tentukan tag rilis
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Siapkan Python runtime (bundle agar jalan tanpa Python di PC target)
+        shell: pwsh
+        run: ./scripts/prepare-python-runtime.ps1
+
+      - name: Build Tauri + buat Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Tanda tangan updater — WAJIB agar tombol "Update Aplikasi" berfungsi.
+          # Tambahkan kedua secret ini di repo (Settings > Secrets and variables > Actions).
+          # Jika key dibuat tanpa password, biarkan TAURI_SIGNING_PRIVATE_KEY_PASSWORD kosong.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ steps.tag.outputs.value }}
+          releaseName: "Nexus ${{ steps.tag.outputs.value }}"
+          releaseBody: |
+            Build otomatis Nexus ${{ steps.tag.outputs.value }}.
+
+            **Installer Windows** (`.exe` / `.msi`) sudah membundel:
+            - Engine Python (tidak perlu memasang Python di komputer target)
+            - Bootstrapper WebView2 (otomatis terpasang bila belum ada)
+
+            Unduh `Nexus_*_x64-setup.exe` lalu jalankan. Tidak perlu instalasi
+            tambahan untuk membuka aplikasi.
+          releaseDraft: false
+          prerelease: false
+          # Hasilkan & unggah latest.json (manifest updater) ke Release agar
+          # endpoint .../releases/latest/download/latest.json bisa diakses aplikasi.
+          includeUpdaterJson: true

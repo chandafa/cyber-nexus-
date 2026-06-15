@@ -36,23 +36,32 @@ class ApiSecurityTester:
             rp = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
             for line in (rp.stdout or '').splitlines()[:60]:
                 cb(line)
-            with open(out, encoding='utf-8', errors='replace') as f:
-                data = json.load(f)
-            res = [{'url': r.get('url'), 'status': r.get('status'), 'length': r.get('length')}
-                   for r in data.get('results', [])]
-            return res if res else self._demo_endpoints(base_url, cb)
+            res = []
+            # ffuf dengan -s & 0 match kadang tak menulis file output → anggap kosong.
+            if os.path.exists(out):
+                with open(out, encoding='utf-8', errors='replace') as f:
+                    data = json.load(f)
+                res = [{'url': r.get('url'), 'status': r.get('status'), 'length': r.get('length')}
+                       for r in data.get('results', [])]
+            cb(f'[=] Selesai. {len(res)} endpoint ditemukan.')
+            return res  # hasil NYATA (boleh kosong) — jangan dipalsukan dengan demo
         except subprocess.TimeoutExpired:
-            cb('[!] ffuf timeout. Mode demo.')
+            cb('[!] ffuf timeout.')
             return self._demo_endpoints(base_url, cb)
         except Exception as e:
-            cb(f'[!] {e}. Mode demo.')
+            cb(f'[!] {e}.')
             return self._demo_endpoints(base_url, cb)
 
     def check_graphql_introspection(self, endpoint: str,
                                     cb: Optional[Callable] = None) -> dict:
         cb = cb or emit_line
         cb(f'[*] GraphQL introspection check: {endpoint}')
+        from core.subprocess_runner import demo_disabled, DemoDisabled
         if not _HAS_REQUESTS:
+            if demo_disabled():
+                cb('[REAL] Library "requests" tidak tersedia — tidak bisa cek '
+                   'introspection. Mode eksekusi nyata: hasil contoh tidak ditampilkan.')
+                raise DemoDisabled('graphql: requests tidak tersedia')
             cb('[DEMO] requests tidak tersedia — hasil demo.')
             return {'introspection_enabled': True, 'type_count': 42, 'risk': 'medium',
                     'recommendation': 'Disable introspection di production'}
@@ -64,9 +73,11 @@ class ApiSecurityTester:
                     'risk': 'medium' if types else 'none',
                     'recommendation': 'Disable introspection di production' if types else 'Aman'}
         except Exception as e:
-            cb(f'[DEMO] {e} — fallback demo.')
-            return {'introspection_enabled': True, 'type_count': 37, 'risk': 'medium',
-                    'recommendation': 'Disable introspection di production'}
+            # Mode nyata: jangan palsukan "enabled" — laporkan endpoint tak terjangkau.
+            cb(f'[!] GraphQL endpoint tidak terjangkau / bukan GraphQL: {e}')
+            return {'introspection_enabled': False, 'type_count': 0, 'risk': 'unknown',
+                    'error': str(e),
+                    'recommendation': 'Endpoint tidak merespons query introspection'}
 
     def _demo_endpoints(self, base: str, cb: Callable) -> List[dict]:
         found = [

@@ -11,6 +11,7 @@ use commands::dependency::{
     run_tool_json,
 };
 use commands::executor::{run_port_scan, run_scan, stop_scan, ScanRegistry};
+use commands::pty::{pty_close, pty_open, pty_resize, pty_write, PtyRegistry};
 use commands::report::{
     generate_report, generate_report_from_data, open_path, reveal_path, write_text_file,
 };
@@ -19,10 +20,20 @@ use db::Db;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init());
+
+    // Updater hanya untuk desktop (bukan Android/iOS) — auto-update dari GitHub Release.
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
+    builder
         .manage(ScanRegistry::default())
+        .manage(PtyRegistry::default())
         .setup(|app| {
             // Inisialisasi database di folder data aplikasi.
             let data_dir = app
@@ -40,6 +51,11 @@ pub fn run() {
             run_scan,
             run_port_scan,
             stop_scan,
+            // terminal interaktif (PTY)
+            pty_open,
+            pty_write,
+            pty_resize,
+            pty_close,
             // dependency & sistem
             check_dependencies,
             get_install_info,

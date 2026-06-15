@@ -1,0 +1,20 @@
+# requirements-runtime.txt — dependency Python yang DI-BUNDLE bersama aplikasi.
+#
+# HANYA paket yang BENAR-BENAR di-import oleh engine DAN punya wheel (binary)
+# sehingga aman dipasang ke Python embeddable TANPA toolchain build (embeddable
+# tidak menyertakan setuptools; sdist yang perlu di-compile akan GAGAL di CI).
+#
+# Dipakai oleh:
+#   jinja2     → python/report/generator.py (render laporan HTML)
+#   requests   → python/modules/api_tester.py, wordlist_manager.py
+#   APScheduler→ python/modules/scheduler.py (CronTrigger / next_run)
+#
+# Sengaja DIKECUALIKAN (tidak di-import / fallback / dipasang terpisah):
+#   - python-nmap, dpkt, python-evtx → SDIST (perlu build) & TIDAK di-import.
+#   - networkx, colorama, tqdm       → tidak di-import oleh modul mana pun.
+#   - weasyprint → butuh GTK native; report fallback ke HTML.
+#   - scapy      → butuh Npcap saat runtime; modul terkait fallback.
+#   - sslyze/prowler → dipasang via Setup/Installer ke venv terisolasi.
+jinja2==3.1.2
+requests==2.31.0
+APScheduler==3.10.4
