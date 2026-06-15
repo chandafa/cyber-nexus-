@@ -59,18 +59,28 @@ Write-Host "==> Memasang pip"
 Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile $getPip -UseBasicParsing
 & $py $getPip --no-warn-script-location
 Remove-Item $getPip -Force
+if ($LASTEXITCODE -ne 0) { throw "Instalasi pip gagal." }
+
+# 3b. Pasang setuptools + wheel. Python embeddable TIDAK menyertakannya dan
+#     get-pip versi baru juga tidak — tanpa ini, paket sdist (mis. yang perlu
+#     'setuptools.build_meta') akan GAGAL build. Wajib agar pip install stabil.
+Write-Host "==> Memasang setuptools + wheel"
+& $py -m pip install --no-warn-script-location --upgrade setuptools wheel
+if ($LASTEXITCODE -ne 0) { throw "Instalasi setuptools/wheel gagal." }
 
 # 4. Pasang dependency engine (subset aman untuk bundle — tanpa lib native berat).
+#    --prefer-binary: utamakan wheel agar tidak perlu compile dari sdist.
 if (Test-Path $reqFile) {
   Write-Host "==> Memasang dependency: $reqFile"
-  & $py -m pip install --no-warn-script-location -r $reqFile
+  & $py -m pip install --no-warn-script-location --prefer-binary -r $reqFile
+  if ($LASTEXITCODE -ne 0) { throw "Instalasi dependency runtime gagal." }
 } else {
   Write-Warning "requirements-runtime.txt tidak ditemukan — melewati instalasi paket."
 }
 
-# 5. Verifikasi cepat.
+# 5. Verifikasi cepat — semua dependency yang DI-IMPORT engine harus bisa di-load.
 Write-Host "==> Verifikasi runtime"
-& $py -c "import sys, jinja2, requests; print('Python', sys.version.split()[0], '| jinja2', jinja2.__version__, '| requests', requests.__version__)"
+& $py -c "import sys, jinja2, requests, apscheduler; print('Python', sys.version.split()[0], '| jinja2', jinja2.__version__, '| requests', requests.__version__, '| APScheduler', apscheduler.__version__)"
 if ($LASTEXITCODE -ne 0) { throw "Verifikasi runtime gagal." }
 
 Write-Host "==> Python runtime siap di $dest" -ForegroundColor Green
