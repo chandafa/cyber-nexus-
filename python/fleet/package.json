@@ -9,7 +9,8 @@
     "nexus-manager": "bin/nexus-manager.js",
     "nexus-agent": "bin/nexus-agent.js",
     "nexus-cli": "bin/nexus-cli.js",
-    "nexus-dashboard": "bin/nexus-dashboard.js"
+    "nexus-dashboard": "bin/nexus-dashboard.js",
+    "nexus-license": "bin/nexus-license.js"
   },
   "files": [
     "bin/",
@@ -18,6 +19,7 @@
     "nexus_agent/",
     "nexus_cli/",
     "nexus_dashboard/",
+    "nexus_license/",
     "README.md"
   ],
   "scripts": {

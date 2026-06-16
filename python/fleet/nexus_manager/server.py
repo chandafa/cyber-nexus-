@@ -23,11 +23,36 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from nexus_common import protocol as fc
 from nexus_common import schema
+from nexus_common import license as licensing
 from nexus_common.log import log
 from nexus_manager import rules as ruleengine
 
 _SERVER = None
 _THREAD = None
+_ENT = None
+
+
+def ent() -> dict:
+    """Hak pakai (entitlements) hasil verifikasi lisensi — di-cache per proses."""
+    global _ENT
+    if _ENT is None:
+        _ENT = licensing.entitlements()
+    return _ENT
+
+
+def reload_license() -> dict:
+    global _ENT
+    _ENT = licensing.entitlements()
+    return _ENT
+
+
+def license_status() -> dict:
+    e = ent()
+    return {"module": "fleet_manager", "valid": e["valid"], "tier": e["tier"],
+            "licensee": e["licensee"], "max_agents": e["max_agents"],
+            "features": sorted(e["features"]), "expires": e["expires"],
+            "expires_iso": fc.iso(e["expires"]) if e["expires"] else "—",
+            "reason": e["reason"]}
 
 EVENT_CAP = 20000        # retensi: simpan maksimal N event terbaru
 ALERT_CAP = 10000
@@ -196,6 +221,18 @@ def _policy_version() -> int:
 def _enroll(body, raw, enroll_sig) -> tuple:
     if not fc.verify(_get_cfg("enroll_key"), raw, enroll_sig):
         return 401, {"error": "enrollment key tidak valid"}
+    # Gerbang lisensi: batas jumlah agent sesuai tier (FREE = beberapa, PRO = seat,
+    # ENTERPRISE = unlimited).
+    e = ent()
+    if e["max_agents"] is not None:
+        c0 = _conn()
+        n = c0.execute("SELECT COUNT(*) n FROM agents").fetchone()["n"]
+        c0.close()
+        if n >= e["max_agents"]:
+            log(f"[MANAGER] Enrollment ditolak: batas tier {e['tier']} ({e['max_agents']} agent) tercapai.")
+            return 403, {"error": f"Batas agent tier '{e['tier']}' tercapai "
+                                  f"({e['max_agents']}). Upgrade lisensi untuk menambah agent.",
+                         "tier": e["tier"], "max_agents": e["max_agents"]}
     fp = body.get("fingerprint", {})
     labels = body.get("labels", []) if isinstance(body.get("labels"), list) else []
     agent_id = fc.new_id("agt")
@@ -254,6 +291,10 @@ def _ingest_events(agent_id, body) -> tuple:
     accept_demo = (_get_cfg("accept_demo") or "0") == "1"
     tenant = _get_cfg("tenant") or "default"
     ruleset = get_rules()
+    # Gerbang lisensi: tanpa fitur 'advanced_rules' (FREE), hanya rule tier 'free'
+    # yang aktif (rule premium spt FIM .env, web-audit, dll. butuh lisensi).
+    if not licensing.has(ent(), "advanced_rules"):
+        ruleset = [r for r in ruleset if r.get("tier", "pro") == "free"]
     host = _host_for(agent_id)
     c = _conn()
     stored = skipped = n_alerts = 0
@@ -448,6 +489,8 @@ class _Handler(BaseHTTPRequestHandler):
                                     "version": fc.API_VERSION, "time": fc.now()})
         if path in ("/policy", "/policies"):
             return self._send(200, {"policy": _policy(), "policy_version": _policy_version()})
+        if path == "/license":
+            return self._send(200, license_status())
         if not self._admin_ok():
             return self._send(401, {"error": "admin token diperlukan"})
 
@@ -580,6 +623,9 @@ def import_sigma(sigma_json, actor="admin") -> dict:
     """Konversi rule Sigma (JSON) -> rule native & tambahkan ke ruleset."""
     from nexus_manager import sigma as sigmod
     init_db()
+    if not licensing.has(ent(), "sigma"):
+        return {"ok": False, "error": "Import Sigma butuh lisensi Pro/Enterprise.",
+                "feature": "sigma"}
     try:
         data = json.loads(sigma_json) if isinstance(sigma_json, str) else sigma_json
     except Exception as e:
@@ -598,6 +644,9 @@ def import_sigma(sigma_json, actor="admin") -> dict:
 
 def response_action(agent_id, action, ip="", target="", actor="admin") -> dict:
     """Active Response: antri perintah respon ke agent (eksekusi dgn dry-run default)."""
+    if not licensing.has(ent(), "active_response"):
+        return {"ok": False, "error": "Active Response butuh lisensi Pro/Enterprise.",
+                "feature": "active_response"}
     r = queue_command(agent_id, "respond", {"action": action, "ip": ip, "target": target})
     if r.get("ok"):
         _audit(actor, "response:" + action, f"{agent_id} {ip or target}")
@@ -748,9 +797,12 @@ def _probe_running(host, port):
 def manager_status(host=fc.DEFAULT_MANAGER_HOST, port=fc.DEFAULT_MANAGER_PORT) -> dict:
     init_db()
     s = stats()
+    e = ent()
     return {"module": "fleet_manager", "running": _probe_running(host, int(port)),
             "enroll_key": get_enroll_key(), "admin_token": get_admin_token(),
             "host": host, "port": int(port),
+            "license": {"tier": e["tier"], "valid": e["valid"], "licensee": e["licensee"],
+                        "max_agents": e["max_agents"], "features": sorted(e["features"])},
             **{k: v for k, v in s.items() if k != "module"}}
 
 
@@ -765,6 +817,14 @@ def _banner(host, port):
     log(f"[MANAGER] Dashboard      : http://{host}:{port}/")
     log(f"[MANAGER] Enrollment key : {get_enroll_key()}")
     log(f"[MANAGER] Admin token    : {get_admin_token()}")
+    e = ent()
+    if e["valid"]:
+        seats = "unlimited" if e["max_agents"] is None else e["max_agents"]
+        log(f"[MANAGER] Lisensi        : {e['tier'].upper()} — {e['licensee']} "
+            f"({seats} agent, exp {fc.iso(e['expires']) if e['expires'] else 'never'})")
+    else:
+        log(f"[MANAGER] Lisensi        : FREE (terbatas {licensing.FREE_MAX_AGENTS} agent, "
+            f"fitur dasar). Pasang NEXUS_LICENSE untuk membuka Pro.")
     log("[MANAGER] Bagikan host:port + enrollment key ke endpoint untuk mendaftarkan agent.")
 
 

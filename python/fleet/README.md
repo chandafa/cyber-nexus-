@@ -54,10 +54,33 @@ nexus-dashboard --port 8080              # (opsional) host dashboard di port ter
 - **Alert engine**: dedup anti-fatigue, ack/resolve, retensi, audit log.
 - **Keamanan**: HMAC per-agent, enrollment key, admin token; HTTP LAN (offline-first).
 
-Uji end-to-end: `python ../tests/test_fleet.py` (21 seksi).
+Uji end-to-end: `python ../tests/test_fleet.py` (28 seksi).
+
+## Lisensi & monetisasi (freemium / open-core)
+Manager memberlakukan **tier** berdasarkan token lisensi yang ditandatangani **vendor** (Anda):
+
+| | FREE (tanpa lisensi) | PRO | ENTERPRISE |
+|---|---|---|---|
+| Jumlah agent | 2 | seat (mis. 50) | unlimited |
+| Rule | dasar (firewall/port/disk/login) | **semua** (FIM `.env`, web-audit, SCA, vuln) | semua |
+| Sigma import | ❌ | ✅ | ✅ |
+| Active Response | ❌ | ✅ | ✅ |
+| Web/app audit, report, posture | terbatas | ✅ | ✅ |
+
+**Cara Anda (vendor) berjualan:**
+```bash
+nexus-license keygen --out vendor_private.key          # SEKALI — simpan private key RAHASIA;
+                                                        # public key ditanam ke paket (verifikasi)
+nexus-license issue --key vendor_private.key \          # terbitkan utk pelanggan yg sudah bayar
+    --licensee "PT Contoh" --tier pro --days 365 --max-agents 50 --out pt-contoh.license
+```
+**Pelanggan memasang lisensi:** `NEXUS_LICENSE=/path/pt-contoh.license` lalu jalankan manager.
+Tanpa lisensi valid → otomatis tier FREE. Lisensi ditandatangani **Ed25519** — pelanggan **tak bisa
+memalsukan** tanpa private key Anda. (Kejujuran open-core: pada kode publik, gerbang ini menahan
+penyalahgunaan kasual; perlindungan kuat = simpan modul premium privat / jalankan sisi-server.)
 
 > Roadmap menuju standar industri penuh: agent Go/Rust, OpenSearch/Postgres, mTLS/gRPC,
-> import Sigma, YARA, Active Response, OCSF penuh, AI remediation, RBAC multi-tenant.
+> YARA, OCSF penuh, AI remediation, RBAC multi-tenant, server lisensi + pembayaran (Midtrans/Stripe).
 > Pembeda: developer-first (audit Laravel/React/Next, parser log app, security posture score).
 
 *For Personal / Ethical Hacking Study Only.*

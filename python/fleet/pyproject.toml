@@ -37,9 +37,12 @@ nexus-manager = "nexus_manager.__main__:main"
 nexus-agent = "nexus_agent.__main__:main"
 nexus-cli = "nexus_cli.__main__:main"
 nexus-dashboard = "nexus_dashboard.server:main"
+nexus-license = "nexus_license.__main__:main"
 
 [tool.setuptools]
-packages = ["nexus_common", "nexus_manager", "nexus_agent", "nexus_cli", "nexus_dashboard"]
+packages = ["nexus_common", "nexus_manager", "nexus_agent", "nexus_cli",
+            "nexus_dashboard", "nexus_license"]
 
 [tool.setuptools.package-data]
 nexus_dashboard = ["*.html", "*.css", "*.js"]
+nexus_common = ["vendor_public.key"]

@@ -106,14 +106,14 @@ DEFAULT_RULES = [
         "response": ["notify"],
     },
     {
-        "id": "NEXUS-FW-001", "name": "Firewall host NONAKTIF",
+        "id": "NEXUS-FW-001", "tier": "free", "name": "Firewall host NONAKTIF",
         "category": "config_assessment", "level": 10, "mitre": ["T1562.004"],
         "conditions": {"type": "firewall", "data.enabled": False},
         "recommendation": "Aktifkan firewall host & batasi inbound ke port esensial.",
         "response": ["notify"],
     },
     {
-        "id": "NEXUS-NET-001", "name": "Port berisiko terekspos",
+        "id": "NEXUS-NET-001", "tier": "free", "name": "Port berisiko terekspos",
         "category": "network_activity", "level": 7, "mitre": ["T1046"],
         "conditions": {"type": "exposure"},
         "recommendation": "Tutup/filter layanan (RDP/SMB/DB) atau batasi ke VPN/allowlist.",
@@ -127,7 +127,7 @@ DEFAULT_RULES = [
         "response": ["notify", "create_incident"],
     },
     {
-        "id": "NEXUS-AUTH-002", "name": "Lonjakan login gagal",
+        "id": "NEXUS-AUTH-002", "tier": "free", "name": "Lonjakan login gagal",
         "category": "authentication", "level": 8, "mitre": ["T1110"],
         "conditions": {"type": "failed_logins", "severity_gte": "medium"},
         "recommendation": "Pantau sumber percobaan login; pertimbangkan MFA.",
@@ -148,7 +148,7 @@ DEFAULT_RULES = [
         "response": ["notify", "create_incident"],
     },
     {
-        "id": "NEXUS-DISK-001", "name": "Kapasitas disk kritis",
+        "id": "NEXUS-DISK-001", "tier": "free", "name": "Kapasitas disk kritis",
         "category": "device_inventory", "level": 6, "mitre": [],
         "conditions": {"type": "disk", "severity_gte": "high"},
         "recommendation": "Bebaskan ruang/perluas volume; cek log yang membengkak.",
