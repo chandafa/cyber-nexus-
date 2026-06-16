@@ -87,6 +87,7 @@ export const Ic = {
   suite: mk("solar:shield-network-bold-duotone"),
   mitigation: mk("solar:clipboard-check-bold-duotone"),
   wordlistMgr: mk("solar:book-2-bold-duotone"),
+  human: mk("solar:book-2-bold-duotone"),
 };
 
 export type IcName = keyof typeof Ic;

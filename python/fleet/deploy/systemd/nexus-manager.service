@@ -1,0 +1,21 @@
+# /etc/systemd/system/nexus-manager.service
+# Install:
+#   sudo cp nexus-manager.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now nexus-manager
+[Unit]
+Description=Nexus Manager (fleet API server)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Sesuaikan User & ExecStart (pakai entrypoint pip `nexus-manager` atau `python -m`)
+User=nexus
+Environment=NEXUS_FLEET_DB=/var/lib/nexus/fleet_manager.db
+ExecStart=/usr/local/bin/nexus-manager run --host 0.0.0.0 --port 8765
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

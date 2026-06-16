@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nexus Dashboard — Fleet Monitoring</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <div class="brand"><span class="logo">◆</span> NEXUS <span class="sub">Fleet Dashboard</span></div>
+    <div class="conn">
+      <input id="host" placeholder="manager host" value="127.0.0.1" />
+      <input id="port" placeholder="port" value="8765" style="width:70px" />
+      <input id="token" placeholder="admin token" type="password" />
+      <button id="connect">Connect</button>
+      <span id="dot" class="dot off" title="status"></span>
+    </div>
+  </header>
+
+  <section class="cards">
+    <div class="card"><div class="big" id="s-agents">0</div><div class="lbl">Agents</div></div>
+    <div class="card"><div class="big" id="s-online">0</div><div class="lbl">Online</div></div>
+    <div class="card"><div class="big" id="s-events">0</div><div class="lbl">Events</div></div>
+    <div class="card"><div class="big crit" id="s-open">0</div><div class="lbl">Open alerts</div></div>
+    <div class="card"><div class="big crit" id="s-risk">0</div><div class="lbl">Risk score</div></div>
+  </section>
+
+  <section class="panel alerts-panel">
+    <h2>Alerts <span class="hint">rule engine · MITRE ATT&CK · klik untuk ack/resolve</span></h2>
+    <div class="filters">
+      <select id="astatus"><option value="">semua status</option>
+        <option value="open">open</option><option value="ack">ack</option>
+        <option value="resolved">resolved</option></select>
+      <button id="arefresh" class="ghost">Refresh</button>
+    </div>
+    <table id="alerts"><thead><tr>
+      <th>Waktu</th><th>Lvl</th><th>Severity</th><th>Rule</th><th>Title</th>
+      <th>MITRE</th><th>Agent</th><th>Status</th>
+    </tr></thead><tbody></tbody></table>
+    <p class="empty" id="alerts-empty">Belum ada alert.</p>
+  </section>
+
+  <main>
+    <div class="panel">
+      <h2>Agents</h2>
+      <table id="agents"><thead><tr>
+        <th>Name</th><th>Host / OS</th><th>IP</th><th>Status</th><th>Last seen</th><th></th>
+      </tr></thead><tbody></tbody></table>
+      <p class="empty" id="agents-empty">Belum ada agent. Hubungkan & enroll endpoint.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Security Events</h2>
+      <div class="filters">
+        <select id="sev"><option value="">semua severity</option>
+          <option>critical</option><option>high</option><option>medium</option>
+          <option>low</option><option>info</option></select>
+        <button id="refresh" class="ghost">Refresh</button>
+      </div>
+      <table id="events"><thead><tr>
+        <th>Waktu</th><th>Severity</th><th>Type</th><th>Title</th><th>Agent</th>
+      </tr></thead><tbody></tbody></table>
+      <p class="empty" id="events-empty">Belum ada event.</p>
+    </div>
+  </main>
+
+  <footer>Nexus Fleet · for personal / ethical hacking study only · data tetap di LAN Anda</footer>
+  <script src="app.js"></script>
+</body>
+</html>

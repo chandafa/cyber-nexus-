@@ -78,14 +78,26 @@ const GROUPS: { title: string; icon: IconComp; items: NavItem[] }[] = [
     items: [
       { to: "/defense-monitor", label: "Defense Monitor", icon: Ic.defense },
       { to: "/defense-suite", label: "Defense Suite", icon: Ic.suite },
-          { to: "/waf", label: "WAF", icon: Ic.mitigation },
+      { to: "/nexus-agents", label: "Nexus Agents", icon: Ic.server },
+      { to: "/ebpf-security", label: "eBPF Shield", icon: Ic.logo },
+      { to: "/waf", label: "WAF", icon: Ic.mitigation },
+      { to: "/human-element", label: "Human Element", icon: Ic.human },
       { to: "/report", label: "Report Generator", icon: Ic.report },
+    ],
+  },
+  {
+    title: "Fleet / SOC",
+    icon: Ic.server,
+    items: [
+      { to: "/fleet-manager", label: "Fleet Manager (Server)", icon: Ic.server },
+      { to: "/fleet-agent", label: "Fleet Agent (Endpoint)", icon: Ic.suite },
     ],
   },
   {
     title: "Sistem",
     icon: Ic.settings,
     items: [
+      { to: "/system-health", label: "System Monitor", icon: Ic.server },
       { to: "/history", label: "History", icon: Ic.history },
       { to: "/scheduler", label: "Scheduler", icon: Ic.scheduler },
       { to: "/wordlist-manager", label: "Wordlist Manager", icon: Ic.wordlistMgr },

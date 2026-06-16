@@ -42,3 +42,7 @@ python/modules/waf_key.pem
 # Tauri updater signing keys — RAHASIA, jangan pernah commit private key.
 # Public key (.pub) boleh ditaruh di tauri.conf.json; private key masuk GitHub Secret.
 .tauri-keys/
+# Python packaging build artifacts
+*.egg-info/
+build/
+python/fleet/dist/

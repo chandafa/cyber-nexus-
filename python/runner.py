@@ -154,7 +154,8 @@ def dispatch(command: str, kwargs: dict) -> dict:
             'ssl_enabled': kwargs.get('ssl_enabled', 'false'),
             'ssl_cert_type': kwargs.get('ssl_cert_type', 'self_signed'),
             'ssl_cert_path': kwargs.get('ssl_cert_path', ''),
-            'ssl_key_path': kwargs.get('ssl_key_path', '')
+            'ssl_key_path': kwargs.get('ssl_key_path', ''),
+            'blacklist_ips': kwargs.get('blacklist_ips', '')
         }
         if fg:
             return waf.run_foreground(**run_args)
@@ -173,6 +174,10 @@ def dispatch(command: str, kwargs: dict) -> dict:
         limit = int(kwargs.get('limit', '200'))
         return waf.get_logs(limit=limit)
 
+    if command == 'waf_clear_logs':
+        from modules import waf
+        return waf.clear_logs()
+
     if command == 'waf_get_vhosts':
         from modules import waf
         return waf.get_vhosts()
@@ -187,7 +192,10 @@ def dispatch(command: str, kwargs: dict) -> dict:
             learning_mode=kwargs.get('learning_mode', 'false'),
             allowlist_ips=kwargs.get('allowlist_ips', ''),
             allowlist_paths=kwargs.get('allowlist_paths', ''),
-            rules_json=kwargs.get('rules_json', '[]')
+            rules_json=kwargs.get('rules_json', '[]'),
+            vhost_type=kwargs.get('vhost_type', 'proxy'),
+            root_directory=kwargs.get('root_directory', ''),
+            blacklist_ips=kwargs.get('blacklist_ips', '')
         )
 
     if command == 'waf_delete_vhost':
@@ -315,6 +323,113 @@ def dispatch(command: str, kwargs: dict) -> dict:
         return attack_simulation.run(kwargs.get('simulation', ''),
                                      kwargs.get('target', ''),
                                      kwargs.get('confirmed', 'false'))
+
+    # -------------------------------------------------- Fleet (agent <-> manager)
+    if command == 'manager_start':
+        from modules import fleet_manager
+        host = kwargs.get('host', '127.0.0.1')
+        port = kwargs.get('port', '8765')
+        if str(kwargs.get('foreground', '')).lower() in ('1', 'true', 'yes'):
+            return fleet_manager.run_foreground(host=host, port=port)
+        return fleet_manager.run(host=host, port=port)
+
+    if command == 'manager_status':
+        from modules import fleet_manager
+        return fleet_manager.manager_status(kwargs.get('host', '127.0.0.1'),
+                                            kwargs.get('port', '8765'))
+
+    if command == 'fleet_agents':
+        from modules import fleet_manager
+        return fleet_manager.list_agents()
+
+    if command == 'fleet_events':
+        from modules import fleet_manager
+        return fleet_manager.list_events(int(kwargs.get('limit', 200)),
+                                         kwargs.get('agent_id', ''),
+                                         kwargs.get('severity', ''))
+
+    if command == 'fleet_stats':
+        from modules import fleet_manager
+        return fleet_manager.stats()
+
+    if command == 'fleet_alerts':
+        from modules import fleet_manager
+        return fleet_manager.list_alerts(int(kwargs.get('limit', 200)),
+                                         kwargs.get('status', ''),
+                                         kwargs.get('severity', ''),
+                                         int(kwargs.get('min_level', 0)))
+
+    if command == 'fleet_alert_ack':
+        from modules import fleet_manager
+        return fleet_manager.ack_alert(kwargs.get('id', ''), kwargs.get('status', 'ack'))
+
+    if command == 'fleet_rules_get':
+        from modules import fleet_manager
+        return {'module': 'fleet_manager', 'rules': fleet_manager.get_rules()}
+
+    if command == 'fleet_rules_set':
+        from modules import fleet_manager
+        return fleet_manager.set_rules(kwargs.get('rules', '[]'))
+
+    if command == 'fleet_audit':
+        from modules import fleet_manager
+        return fleet_manager.list_audit(int(kwargs.get('limit', 200)))
+
+    if command == 'fleet_report':
+        from modules import fleet_manager
+        return fleet_manager.report(kwargs.get('scope', 'fleet'))
+
+    if command == 'fleet_posture':
+        from modules import fleet_manager
+        return {'module': 'fleet_manager', 'posture': fleet_manager.posture(kwargs.get('agent_id', ''))}
+
+    if command == 'fleet_sigma_import':
+        from modules import fleet_manager
+        return fleet_manager.import_sigma(kwargs.get('sigma', '[]'))
+
+    if command == 'fleet_respond':
+        from modules import fleet_manager
+        return fleet_manager.response_action(kwargs.get('agent_id', ''),
+                                             kwargs.get('action', ''),
+                                             kwargs.get('ip', ''), kwargs.get('target', ''))
+
+    if command == 'fleet_policy_get':
+        from modules import fleet_manager
+        return fleet_manager.get_policy()
+
+    if command == 'fleet_policy_set':
+        from modules import fleet_manager
+        return fleet_manager.set_policy(kwargs.get('policy', '{}'))
+
+    if command == 'fleet_command':
+        from modules import fleet_manager
+        import json as _json
+        try:
+            cargs = _json.loads(kwargs.get('args', '{}') or '{}')
+        except Exception:
+            cargs = {}
+        return fleet_manager.queue_command(kwargs.get('agent_id', ''),
+                                           kwargs.get('cmd', ''), cargs)
+
+    if command == 'agent_enroll':
+        from modules import fleet_agent
+        return fleet_agent.enroll(kwargs.get('host', '127.0.0.1'),
+                                  kwargs.get('port', '8765'),
+                                  kwargs.get('enroll_key', ''),
+                                  kwargs.get('name', ''),
+                                  kwargs.get('labels', ''))
+
+    if command == 'agent_start':
+        from modules import fleet_agent
+        return fleet_agent.run_foreground()
+
+    if command == 'agent_status':
+        from modules import fleet_agent
+        return fleet_agent.status()
+
+    if command == 'agent_reset':
+        from modules import fleet_agent
+        return fleet_agent.reset()
 
     # -------------------------------------------------- backend WSL
     if command == 'wsl_status':

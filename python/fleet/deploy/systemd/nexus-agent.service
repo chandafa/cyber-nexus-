@@ -1,0 +1,22 @@
+# /etc/systemd/system/nexus-agent.service
+# Enroll dulu sekali:
+#   nexus-agent enroll --host <manager> --port 8765 --key <ENROLL_KEY> --labels prod,web
+# Lalu install service:
+#   sudo cp nexus-agent.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now nexus-agent
+[Unit]
+Description=Nexus Agent (endpoint security daemon)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=NEXUS_AGENT_DB=/var/lib/nexus/fleet_agent.db
+ExecStart=/usr/local/bin/nexus-agent start
+Restart=always
+RestartSec=5
+# FIM/SCA butuh baca berkas sistem; jalankan sesuai kebutuhan (root utk FIM penuh).
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
