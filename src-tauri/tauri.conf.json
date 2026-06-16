@@ -30,6 +30,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -39,11 +40,19 @@
     ],
     "resources": [
       "../python/**/*",
-      "../wordlists/**/*"
+      "../wordlists/**/*",
+      "../python-runtime/**/*"
     ],
     "category": "DeveloperTool",
     "shortDescription": "Antarmuka terpadu tools keamanan jaringan",
     "longDescription": "Nexus mengintegrasikan berbagai tools keamanan jaringan (Nmap, tshark, Nikto, Gobuster, Hydra, Hashcat, dll) dalam satu antarmuka desktop untuk pembelajaran ethical hacking dan penetration testing."
   },
-  "plugins": {}
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERBNEVERjFFOTRDRjcxQQpSV1FhOTB6cDhlMmtEZW94MGdEZGpzTkpwTGpuNXFrUXd0L3NyWFNWK0JNRGFpdGFOajd4ZWs4WAo=",
+      "endpoints": [
+        "https://github.com/chandafa/cyber-nexus-/releases/latest/download/latest.json"
+      ]
+    }
+  }
 }

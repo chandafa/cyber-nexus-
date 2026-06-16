@@ -20,6 +20,7 @@ const GROUPS: { title: string; icon: IconComp; items: NavItem[] }[] = [
     items: [
       { to: "/", label: "Dashboard", icon: Ic.dashboard, end: true },
       { to: "/security-score", label: "Security Score", icon: Ic.score },
+      { to: "/terminal", label: "Terminal", icon: Ic.terminal },
     ],
   },
   {
@@ -29,6 +30,7 @@ const GROUPS: { title: string; icon: IconComp; items: NavItem[] }[] = [
       { to: "/port-scanner", label: "Port Scanner", icon: Ic.port },
       { to: "/network-scanner", label: "Network Scanner", icon: Ic.network },
       { to: "/network-mapper", label: "Network Mapper", icon: Ic.mapper },
+      { to: "/dns-recon", label: "Subdomain / DNS Recon", icon: Ic.mapper },
       { to: "/asset-inventory", label: "Asset Inventory", icon: Ic.asset },
     ],
   },
@@ -39,6 +41,7 @@ const GROUPS: { title: string; icon: IconComp; items: NavItem[] }[] = [
       { to: "/vuln-scanner", label: "Vulnerability Scanner", icon: Ic.vuln },
       { to: "/ssl-auditor", label: "SSL/TLS Auditor", icon: Ic.ssl },
       { to: "/api-tester", label: "API Tester", icon: Ic.api },
+      { to: "/dir-fuzzer", label: "Directory Fuzzer", icon: Ic.search },
     ],
   },
   {
@@ -46,8 +49,10 @@ const GROUPS: { title: string; icon: IconComp; items: NavItem[] }[] = [
     icon: Ic.attack,
     items: [
       { to: "/password-auditor", label: "Password Auditor", icon: Ic.password },
+      { to: "/hash-tool", label: "Hash Identifier & Cracker", icon: Ic.hashId },
       { to: "/exploit-lookup", label: "Exploit Lookup", icon: Ic.exploit },
       { to: "/attack-simulation", label: "Attack Simulation", icon: Ic.attack },
+      { to: "/listener", label: "Reverse Shell / Listener", icon: Ic.exploit },
       { to: "/wireless-auditor", label: "Wireless Auditor", icon: Ic.wireless },
     ],
   },

@@ -26,6 +26,7 @@ export const InstallModal: React.FC = () => {
     : [];
   const manual: string[] = result?.manual || [];
   const linuxOnly: string[] = result?.linux_only || [];
+  const rebootRequired: boolean = result?.reboot_required === true;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-6">
@@ -57,6 +58,12 @@ export const InstallModal: React.FC = () => {
             )}
             {manual.length > 0 && (
               <div className="text-severity-medium">⚠ Perlu manual: {manual.join(", ")}</div>
+            )}
+            {rebootRequired && (
+              <div className="text-severity-medium">
+                ⟳ WSL terpasang — <b>RESTART komputer</b>, lalu buka Nexus & klik tombol WSL sekali
+                lagi untuk menyelesaikan setup.
+              </div>
             )}
           </div>
         )}

@@ -248,7 +248,26 @@ def run_all_checks() -> dict:
         r['min_ver'] = meta.get('min_ver', '')
         r['desc'] = meta.get('desc', '')
         r['install'] = meta.get('install', {})
+        r['via'] = 'native' if r['installed'] else None
         results[name] = r
+
+    # Tool apa pun yang tak ada native di Windows: tandai tersedia bila ada di
+    # WSL (auto-route akan menjalankannya via WSL secara transparan). Deteksi
+    # batch (satu pemanggilan wsl) agar cepat.
+    try:
+        from . import wsl_backend
+        if wsl_backend.wsl_available():
+            distro = wsl_backend.default_distro()
+            missing = [n for n, r in results.items() if not r['installed']]
+            in_wsl = wsl_backend.tools_in_wsl(missing, distro)
+            for name in in_wsl:
+                r = results[name]
+                r['installed'] = True
+                r['via'] = 'wsl'
+                r['version'] = f'via WSL ({distro})'
+                r['path'] = f'wsl:{distro}'
+    except Exception:
+        pass
     return results
 
 

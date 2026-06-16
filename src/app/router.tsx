@@ -13,6 +13,7 @@ import { DefenseMonitor } from "../pages/DefenseMonitor";
 import { ReportGenerator } from "../pages/ReportGenerator";
 import { History } from "../pages/History";
 import { Settings } from "../pages/Settings";
+
 // SDD v2
 import { SslAuditor } from "../pages/SslAuditor";
 import { ExploitLookup } from "../pages/ExploitLookup";
@@ -31,6 +32,13 @@ import { WAF } from "../pages/WAF";
 import { SystemHealth } from "../pages/SystemHealth";
 import { EbpfSecurity } from "../pages/EbpfSecurity";
 import { HumanElement } from "../pages/HumanElement";
+
+// Terminal interaktif + modul baru
+import { Shell } from "../pages/Shell";
+import { DnsRecon } from "../pages/DnsRecon";
+import { DirFuzzer } from "../pages/DirFuzzer";
+import { Listener } from "../pages/Listener";
+import { HashTool } from "../pages/HashTool";
 
 export const router = createHashRouter([
   { path: "/setup", element: <SetupWizard /> },
@@ -51,6 +59,7 @@ export const router = createHashRouter([
       { path: "report", element: <ReportGenerator /> },
       { path: "history", element: <History /> },
       { path: "settings", element: <Settings /> },
+
       // SDD v2
       { path: "ssl-auditor", element: <SslAuditor /> },
       { path: "exploit-lookup", element: <ExploitLookup /> },
@@ -67,6 +76,12 @@ export const router = createHashRouter([
       { path: "defense-suite", element: <DefenseSuite /> },
       { path: "waf", element: <WAF /> },
       { path: "human-element", element: <HumanElement /> },
+      // Terminal interaktif + modul baru
+      { path: "terminal", element: <Shell /> },
+      { path: "dns-recon", element: <DnsRecon /> },
+      { path: "dir-fuzzer", element: <DirFuzzer /> },
+      { path: "listener", element: <Listener /> },
+      { path: "hash-tool", element: <HashTool /> },
     ],
   },
 ]);

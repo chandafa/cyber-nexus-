@@ -20,6 +20,23 @@ import sys
 import os
 import argparse
 import traceback
+import subprocess
+
+# --- KRITIS (Windows): cegah kedipan jendela console/PowerShell ---
+# Semua subprocess yang dijalankan engine (wsl.exe, where, version-check tool,
+# installer, dll.) akan memunculkan jendela console sekejap karena Nexus adalah
+# aplikasi GUI tanpa console. Patch Popen agar selalu memakai CREATE_NO_WINDOW
+# di Windows — satu titik ini menutup SEMUA pemanggilan subprocess di engine.
+if sys.platform == "win32":
+    _CREATE_NO_WINDOW = 0x08000000
+    _orig_popen = subprocess.Popen
+
+    class _HiddenPopen(_orig_popen):
+        def __init__(self, *args, **kwargs):
+            kwargs["creationflags"] = kwargs.get("creationflags", 0) | _CREATE_NO_WINDOW
+            super().__init__(*args, **kwargs)
+
+    subprocess.Popen = _HiddenPopen  # subprocess.run/call/check_output ikut terpengaruh
 
 # Pastikan folder python/ ada di sys.path agar `core`, `modules` bisa di-import
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -267,6 +284,34 @@ def dispatch(command: str, kwargs: dict) -> dict:
         from modules import ids_monitor
         return ids_monitor.run(kwargs.get('interface', 'eth0'), kwargs.get('duration', 15))
 
+    # ----------------------------------------------------- modul baru (recon/offensive)
+    if command == 'dns_recon':
+        from modules import dns_recon
+        domain = sanitize_target(kwargs.get('domain', ''))
+        wl = kwargs.get('wordlist', '')
+        if wl:
+            sanitize_filepath(wl)
+        return dns_recon.run(domain, wl)
+
+    if command == 'dir_fuzz':
+        from modules import dir_fuzz
+        target = sanitize_url(kwargs.get('target', ''))
+        wl = kwargs.get('wordlist', '')
+        if wl:
+            sanitize_filepath(wl)
+        return dir_fuzz.run(target, wl, kwargs.get('extensions', ''))
+
+    if command == 'listener':
+        from modules import listener
+        return listener.run(**kwargs)
+
+    if command == 'hash_tool':
+        from modules import hash_tool
+        wl = kwargs.get('wordlist', '')
+        if wl:
+            sanitize_filepath(wl)
+        return hash_tool.run(**kwargs)
+
     if command == 'scope':
         from core import scope_guard
         return scope_guard.run(**kwargs)
@@ -278,6 +323,31 @@ def dispatch(command: str, kwargs: dict) -> dict:
         return attack_simulation.run(kwargs.get('simulation', ''),
                                      kwargs.get('target', ''),
                                      kwargs.get('confirmed', 'false'))
+
+    # -------------------------------------------------- backend WSL
+    if command == 'wsl_status':
+        from core import wsl_backend
+        return wsl_backend.status()
+
+    if command == 'set_backend':
+        from core import wsl_backend
+        return {'module': 'set_backend',
+                **wsl_backend.set_backend(kwargs.get('backend', ''),
+                                          kwargs.get('distro', ''),
+                                          no_demo=kwargs.get('no_demo'),
+                                          wsl_user=kwargs.get('wsl_user', ''))}
+
+    if command in ('wsl_install', 'wsl_provision'):
+        from core import wsl_backend
+        from core.dependency_checker import REQUIRED_TOOLS, OPTIONAL_TOOLS
+        all_tools = {**REQUIRED_TOOLS, **OPTIONAL_TOOLS}
+        apt = {t: (m.get('install', {}).get('apt') or t) for t, m in all_tools.items()}
+        tools = [t.strip() for t in str(kwargs.get('tools', '')).split(',') if t.strip()]
+        distro = kwargs.get('distro', '')
+        if command == 'wsl_provision':
+            return wsl_backend.provision_wsl(emit_line, tools=tools,
+                                             apt_packages=apt, distro=distro or 'Ubuntu')
+        return wsl_backend.install_tools_wsl(tools, apt, emit_line, distro)
 
     # -------------------------------------------------- report
     if command == 'generate_report':
@@ -314,6 +384,15 @@ def main():
     except Exception:
         pass
 
+    # Mode eksekusi nyata (no-demo) dari config → set env agar konsisten di
+    # seluruh modul (mereka cek NEXUS_NO_DEMO).
+    try:
+        from core.wsl_backend import get_no_demo
+        if get_no_demo():
+            os.environ['NEXUS_NO_DEMO'] = '1'
+    except Exception:
+        pass
+
     command, kwargs = _parse_kwargs(sys.argv[1:])
     try:
         result = dispatch(command, kwargs)
@@ -323,8 +402,24 @@ def main():
         emit_result({'error': str(e), 'kind': 'validation'})
         sys.exit(2)
     except Exception as e:  # pragma: no cover
-        # Safety net: tool nyata gagal saat runtime -> ulangi sekali dalam mode
-        # demo agar modul tetap menghasilkan output (tidak hard-error ke user).
+        no_demo = os.environ.get('NEXUS_NO_DEMO', '').lower() in ('1', 'true', 'yes', 'on')
+        # Mode eksekusi nyata: JANGAN palsukan data — tampilkan error BERSIH
+        # (tanpa traceback yang menakutkan), kecuali error benar-benar tak terduga.
+        if no_demo:
+            try:
+                from core.subprocess_runner import DemoDisabled
+            except Exception:
+                DemoDisabled = ()
+            if isinstance(e, DemoDisabled):
+                emit_line('[INFO] Tidak ada output nyata dari tool (lihat pesan di atas). '
+                          'Mode eksekusi nyata aktif — data demo tidak ditampilkan.')
+                emit_result({'error': 'no_real_output', 'kind': 'no_demo'})
+            else:
+                emit_line(f'[ERROR] {e}')
+                emit_result({'error': str(e), 'kind': 'runtime'})
+            sys.exit(1)
+        # Default: safety net — ulangi sekali dalam mode demo agar modul tetap
+        # menghasilkan output (tidak hard-error ke user).
         emit_line(f'[WARN] Tool gagal saat runtime: {e}')
         emit_line('[!] Beralih ke mode demo agar modul tetap bisa dipakai...')
         os.environ['NEXUS_FORCE_DEMO'] = '1'

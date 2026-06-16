@@ -22,10 +22,28 @@ const PROGRESS_SENTINEL: &str = "__NEXUS_PROGRESS__";
 #[derive(Default, Clone)]
 pub struct ScanRegistry(pub Arc<Mutex<HashMap<String, Arc<Mutex<Child>>>>>);
 
-/// Pilih executable python yang sesuai OS.
-pub fn python_exe() -> String {
+/// Pilih executable python untuk menjalankan engine.
+///
+/// PRIORITAS (kritis untuk portabilitas — agar .exe jalan di komputer lain
+/// tanpa perlu menginstal Python):
+///   1. Runtime Python yang DI-BUNDLE bersama aplikasi (`<root>/python-runtime/`),
+///      disiapkan oleh CI/CD (`scripts/prepare-python-runtime.ps1`).
+///   2. Fallback: interpreter Python dari PATH host (mode dev / build manual).
+pub fn python_exe(root: &std::path::Path) -> String {
+    // 1. Runtime bundel — dicari relatif terhadap folder yang berisi `python/`.
+    //    Saat di-bundle Tauri, resource `../python-runtime` ditaruh di `_up_/`,
+    //    sehingga `root` (= base hasil resolve_runner) sudah menunjuk ke sana.
+    let bundled = if cfg!(windows) {
+        root.join("python-runtime").join("python.exe")
+    } else {
+        root.join("python-runtime").join("bin").join("python3")
+    };
+    if bundled.exists() {
+        return bundled.to_string_lossy().into_owned();
+    }
+
+    // 2. Fallback ke interpreter host.
     if cfg!(windows) {
-        // `python` lebih umum di Windows; fallback py launcher.
         for c in ["python", "python3", "py"] {
             if which(c) {
                 return c.to_string();
@@ -42,15 +60,24 @@ pub fn python_exe() -> String {
     }
 }
 
+/// Sembunyikan jendela console subprocess (CREATE_NO_WINDOW) di Windows agar
+/// tidak ada kedipan PowerShell/terminal saat memanggil python/where/dll.
+/// No-op di OS lain.
+#[cfg(windows)]
+pub(crate) fn hide_window(cmd: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    cmd.creation_flags(CREATE_NO_WINDOW);
+}
+#[cfg(not(windows))]
+pub(crate) fn hide_window(_cmd: &mut Command) {}
+
 fn which(cmd: &str) -> bool {
     let probe = if cfg!(windows) { "where" } else { "which" };
-    Command::new(probe)
-        .arg(cmd)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    let mut c = Command::new(probe);
+    c.arg(cmd).stdout(Stdio::null()).stderr(Stdio::null());
+    hide_window(&mut c);
+    c.status().map(|s| s.success()).unwrap_or(false)
 }
 
 /// Temukan path runner.py dan project root (folder yang berisi `python/`).
@@ -80,9 +107,19 @@ pub fn resolve_runner(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
     }
 
     for root in roots {
-        let runner = root.join("python").join("runner.py");
-        if runner.exists() {
-            return Ok((runner, root));
+        // Saat di-bundle Tauri, resource yang direferensikan dengan `../python`
+        // ditaruh di bawah folder `_up_` (Tauri mengganti `..` -> `_up_`).
+        // Jadi cek kedua layout: source tree (`python/`) dan bundle (`_up_/python/`).
+        for prefix in ["", "_up_"] {
+            let base = if prefix.is_empty() {
+                root.clone()
+            } else {
+                root.join(prefix)
+            };
+            let runner = base.join("python").join("runner.py");
+            if runner.exists() {
+                return Ok((runner, base));
+            }
         }
     }
     Err("runner.py tidak ditemukan (set env NEXUS_PROJECT_ROOT ke folder proyek)".into())
@@ -95,7 +132,7 @@ pub fn run_python_blocking(
     args: &[String],
 ) -> Result<Value, String> {
     let (runner, root) = resolve_runner(app)?;
-    let mut cmd = Command::new(python_exe());
+    let mut cmd = Command::new(python_exe(&root));
     cmd.arg("-u")
         .arg(&runner)
         .arg(command)
@@ -103,6 +140,7 @@ pub fn run_python_blocking(
         .current_dir(&root)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    hide_window(&mut cmd);
 
     let output = cmd.output().map_err(|e| e.to_string())?;
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -175,14 +213,17 @@ pub async fn run_scan(
         }
     }
 
-    let mut child = Command::new(python_exe())
+    let mut spawn_cmd = Command::new(python_exe(&root));
+    spawn_cmd
         .arg("-u")
         .arg(&runner)
         .arg(&command)
         .args(&args)
         .current_dir(&root)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    hide_window(&mut spawn_cmd);
+    let mut child = spawn_cmd
         .spawn()
         .map_err(|e| format!("Gagal spawn python: {e}"))?;
 

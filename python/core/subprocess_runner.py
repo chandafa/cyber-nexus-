@@ -28,15 +28,33 @@ def tool_available(name: str) -> bool:
     if _resolve_exec(name):
         return True
     alt = {'python3': 'python', 'nc': 'ncat', 'aircrack-ng': 'airodump-ng'}
-    return bool(alt.get(name) and _resolve_exec(alt[name]))
+    if alt.get(name) and _resolve_exec(alt[name]):
+        return True
+    # Fallback transparan: tool Linux-only bisa dijalankan via WSL (Windows).
+    try:
+        from . import wsl_backend
+        if wsl_backend.should_use_wsl(name, native_available=False):
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def tool_argv(name: str, args: list) -> list:
     """Bangun argv lengkap untuk sebuah tool lintas-OS:
+      - tool Linux-only via WSL → [wsl, -d, distro, --, name, ...]
       - tool modul Python (sslyze, prowler) → [python, -m, modul, ...]
       - .bat/.cmd Windows → cmd /c <full> ...
       - lainnya → [full_path, ...]"""
-    if _resolve_exec(name):
+    native = _resolve_exec(name)
+    # Routing WSL (auto-route transparan) bila sesuai mode backend.
+    try:
+        from . import wsl_backend
+        if wsl_backend.should_use_wsl(name, native_available=bool(native)):
+            return wsl_backend.wrap_argv(name, list(args))
+    except Exception:
+        pass
+    if native:
         return fix_tool_cmd([name] + list(args))
     try:
         from .dependency_checker import PYTHON_MODULE_TOOLS, _module_available
@@ -65,18 +83,28 @@ def _resolve_exec(name: str):
 
 
 def fix_tool_cmd(cmd):
-    """Lintas-OS: resolusi executable + bungkus shim .bat/.cmd Windows via `cmd /c`.
-    Resolusi pakai PATH lengkap sehingga tool di ~/.nexus/tools/bin tetap ketemu
-    walau belum masuk os.environ PATH."""
+    """Lintas-OS: resolusi executable + ROUTING WSL transparan + bungkus shim
+    .bat/.cmd Windows via `cmd /c`. Karena mayoritas modul memanggil tool lewat
+    fungsi ini, di sinilah auto-route WSL diterapkan agar tool Linux-only (atau
+    semua tool dalam mode backend 'wsl') berjalan NYATA via WSL."""
     import os
     if not cmd:
         return cmd
-    full = _resolve_exec(cmd[0])
-    if not full:
+    name = cmd[0]
+    native = _resolve_exec(name)
+    # Routing WSL (sama keputusannya dengan tool_argv) — argumen path Windows
+    # otomatis diterjemahkan ke path WSL (/mnt/...).
+    try:
+        from . import wsl_backend
+        if wsl_backend.should_use_wsl(name, native_available=bool(native)):
+            return wsl_backend.wrap_argv(name, list(cmd[1:]))
+    except Exception:
+        pass
+    if not native:
         return cmd  # biarkan gagal natural -> ditangani fallback modul
-    if os.name == 'nt' and full.lower().endswith(('.bat', '.cmd')):
-        return ['cmd', '/c', full] + list(cmd[1:])
-    return [full] + list(cmd[1:])
+    if os.name == 'nt' and native.lower().endswith(('.bat', '.cmd')):
+        return ['cmd', '/c', native] + list(cmd[1:])
+    return [native] + list(cmd[1:])
 
 
 def resolve_python() -> str:
@@ -123,13 +151,35 @@ def run_streaming(
     return proc.returncode
 
 
+class DemoDisabled(RuntimeError):
+    """Diangkat ketika mode eksekusi-nyata aktif tapi sebuah modul mencoba
+    fallback ke demo. Membuat error nyata muncul, bukan data palsu."""
+
+
+def demo_disabled() -> bool:
+    """True bila pengguna mengaktifkan 'Mode Eksekusi Nyata' (tanpa demo)."""
+    import os
+    if os.environ.get('NEXUS_NO_DEMO', '').lower() in ('1', 'true', 'yes', 'on'):
+        return True
+    try:
+        from . import wsl_backend
+        return wsl_backend.get_no_demo()
+    except Exception:
+        return False
+
+
 def simulate_stream(lines: List[str], output_callback: Optional[Callable] = None,
                     delay: float = 0.04) -> None:
     """
-    Demo fallback: streaming baris contoh dengan jeda kecil agar terasa
-    seperti output nyata. Dipakai saat tool tidak terpasang.
+    Demo fallback: streaming baris contoh agar terasa seperti output nyata.
+    Bila mode eksekusi-nyata aktif (NEXUS_NO_DEMO), JANGAN keluarkan data palsu —
+    angkat DemoDisabled agar error nyata yang muncul ke pengguna.
     """
     cb = output_callback or emit_line
+    if demo_disabled():
+        cb('[REAL] Mode eksekusi nyata aktif — fallback demo dinonaktifkan. '
+           'Menampilkan error nyata (tool gagal / tidak tersedia / butuh privilege).')
+        raise DemoDisabled('demo dinonaktifkan (NEXUS_NO_DEMO)')
     for line in lines:
         cb(line)
         if delay:

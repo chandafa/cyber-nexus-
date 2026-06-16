@@ -9,11 +9,17 @@ venv/
 dist/
 src-tauri/target/
 
+# Python runtime yang di-bundle (di-generate scripts/prepare-python-runtime.ps1).
+# Folder dipertahankan via PLACEHOLDER.txt agar glob resource Tauri tidak error
+# saat build lokal/CI tanpa runtime; isi sebenarnya (python.exe, Lib/, dll.) diabaikan.
+python-runtime/*
+!python-runtime/PLACEHOLDER.txt
+
 # Runtime data
 *.db
 *.db-journal
-reports/*.pdf
-captures/*.pcap
+reports/
+captures/
 /tmp/
 
 # OS / editor
@@ -32,3 +38,7 @@ build.exit
 # Certificates
 python/modules/waf_cert.pem
 python/modules/waf_key.pem
+
+# Tauri updater signing keys — RAHASIA, jangan pernah commit private key.
+# Public key (.pub) boleh ditaruh di tauri.conf.json; private key masuk GitHub Secret.
+.tauri-keys/

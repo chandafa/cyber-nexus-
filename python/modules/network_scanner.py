@@ -5,6 +5,7 @@ Live packet capture, filter protokol, deteksi interface, export pcap,
 statistik real-time, dengan demo fallback bila tshark tidak terpasang.
 """
 import subprocess
+import re
 import threading
 import queue
 import random
@@ -12,6 +13,11 @@ from typing import Callable, Optional, List
 
 from core.subprocess_runner import tool_available, simulate_stream, fix_tool_cmd
 from core.stream_handler import emit_line
+
+# Pseudo-interface (bukan NIC nyata) — ditaruh paling bawah daftar.
+_PSEUDO_IFACE = ('etwdump', 'sshdump', 'ciscodump', 'randpktdump', 'udpdump',
+                 'wifidump', 'dpauxmon', 'sdjournal', 'dbus', 'nflog', 'nfqueue',
+                 'bluetooth-monitor', 'bluetooth0')
 
 
 class NetworkScanner:
@@ -23,23 +29,52 @@ class NetworkScanner:
 
     # ------------------------------------------------------------- interfaces
     def get_interfaces(self) -> List[str]:
-        """Daftar interface jaringan yang tersedia."""
+        """Daftar interface jaringan dengan NAMA JELAS. Memakai routing yang
+        SAMA dengan capture (fix_tool_cmd → WSL bila mode wsl) agar nomor
+        indeks interface cocok saat capture."""
         if not tool_available('tshark'):
             return [
-                '1. \\Device\\NPF_{DEMO-ETH0} (Ethernet - demo)',
-                '2. \\Device\\NPF_{DEMO-WLAN} (Wi-Fi - demo)',
-                '3. \\Device\\NPF_Loopback (Adapter for loopback - demo)',
+                '1. Ethernet (demo)',
+                '2. Wi-Fi (demo)',
+                '3. Loopback (demo)',
             ]
         try:
-            result = subprocess.run(['tshark', '-D'], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
-            lines = [l.strip() for l in result.stdout.strip().split('\n') if l.strip()]
-            # Dahulukan NIC nyata (NPF/\Device\) sebelum pseudo-interface (etwdump, dll).
-            real = [l for l in lines if ('\\device\\' in l.lower() or 'npf' in l.lower())]
-            pseudo = [l for l in lines if l not in real]
-            ordered = real + pseudo
-            return ordered or ['(tidak ada interface — Npcap mungkin belum terpasang)']
-        except Exception:
-            return ['(gagal mendeteksi interface)']
+            argv = fix_tool_cmd(['tshark', '-D'])
+            result = subprocess.run(argv, capture_output=True, text=True,
+                                    encoding="utf-8", errors="replace", timeout=20)
+            ifaces = self._parse_interfaces(result.stdout)
+            if ifaces:
+                return ifaces
+            return ['(tidak ada interface terdeteksi — untuk capture jaringan '
+                    'Windows nyata, pasang Wireshark + Npcap lalu set backend "auto")']
+        except Exception as e:
+            return [f'(gagal mendeteksi interface: {e})']
+
+    @staticmethod
+    def _parse_interfaces(raw: str) -> List[str]:
+        """Ubah baris `tshark -D` menjadi "N. Nama Jelas".
+        - Windows: `\\Device\\NPF_{GUID} (Ethernet)` → "N. Ethernet" (buang GUID).
+        - WSL/Linux: `eth0` / `lo (Loopback)` → "N. eth0" / "N. Loopback"."""
+        real, pseudo = [], []
+        for line in (raw or '').splitlines():
+            line = line.strip()
+            m = re.match(r'^(\d+)\.\s+(.*)$', line)
+            if not m:
+                continue
+            idx, rest = m.group(1), m.group(2).strip()
+            fm = re.search(r'\(([^)]+)\)\s*$', rest)            # nama ramah dalam kurung
+            friendly = fm.group(1).strip() if fm else ''
+            devid = re.sub(r'\s*\([^)]*\)\s*$', '', rest).strip()
+            if friendly:
+                name = friendly
+            elif re.match(r'(?i)\\device\\npf_', devid):
+                name = 'Network adapter'                         # GUID tanpa nama ramah
+            else:
+                name = devid
+            disp = f'{idx}. {name}'
+            blob = f'{devid} {name}'.lower()
+            (pseudo if any(p in blob for p in _PSEUDO_IFACE) else real).append(disp)
+        return real + pseudo
 
     # ---------------------------------------------------------------- capture
     def start_capture(
@@ -108,11 +143,16 @@ class NetworkScanner:
             cb(f'[ERROR] {e}')
             error_detected = True
 
-        # Gagal runtime (driver/izin/interface) atau tidak ada paket -> demo.
-        if error_detected or self.stats['packets'] == 0:
-            cb('[!] Capture nyata gagal / 0 paket (Npcap belum jalan, butuh admin, '
-               'atau interface salah). Beralih ke mode demo agar modul tetap bisa dipakai.')
-            return self._demo_capture(cb, packet_limit or 40)
+        # Hanya error nyata (driver/izin/interface) yang dianggap gagal.
+        if error_detected:
+            cb('[!] Capture gagal (driver/Npcap, butuh admin, atau interface salah). '
+               'Untuk capture interface Windows nyata: pasang Wireshark + Npcap & set '
+               'backend "auto".')
+            return self._demo_capture(cb, packet_limit or 40)  # raise bila mode nyata
+        # 0 paket BUKAN error — interface idle / filter ketat / (WSL) hanya NAT-nya.
+        if self.stats['packets'] == 0:
+            cb('[i] 0 paket tertangkap — interface idle, filter terlalu ketat, atau '
+               '(di WSL) hanya melihat jaringan NAT WSL. Coba interface lain / hapus filter.')
 
     def _update_stats(self, line: str):
         parts = line.split('|')
