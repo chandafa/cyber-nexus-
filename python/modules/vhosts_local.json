@@ -1,0 +1,21 @@
+[
+    {
+        "id": 1781503984113,
+        "hostname": "app.localhost",
+        "vhost_type": "static",
+        "backend_host": "127.0.0.1",
+        "backend_port": 8000,
+        "root_directory": "D:\\Desktop\\KERJA\\Tesdia\\foregord.github.io",
+        "max_rps": 10,
+        "learning_mode": false,
+        "allowlist_ips": "",
+        "allowlist_paths": "",
+        "rules": [
+            "sql_injection",
+            "xss",
+            "path_traversal",
+            "cmd_injection",
+            "scanner_detected"
+        ]
+    }
+]
