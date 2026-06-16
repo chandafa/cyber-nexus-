@@ -26,6 +26,9 @@ use commands::ebpf::{
     get_ebpf_status, get_blocked_ips, block_ip, unblock_ip, get_ids_alerts,
     clear_ids_alerts, set_ebpf_active, set_ebpf_interface, EbpfState,
 };
+use commands::nexus_listener::{
+    get_nexus_listener_status, start_nexus_listener, stop_nexus_listener, NexusAgentListenerState,
+};
 use db::Db;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -49,6 +52,7 @@ pub fn run() {
         .manage(WafSupervisorState::default())
         .manage(EbpfState::default())
         .manage(PtyRegistry::default())
+        .manage(NexusAgentListenerState::default())
         .setup(|app| {
             // Inisialisasi database di folder data aplikasi.
             let data_dir = app
@@ -298,6 +302,10 @@ pub fn run() {
             clear_ids_alerts,
             set_ebpf_active,
             set_ebpf_interface,
+            // nexus agent listener
+            get_nexus_listener_status,
+            start_nexus_listener,
+            stop_nexus_listener,
         ])
         .run(tauri::generate_context!())
         .expect("error saat menjalankan aplikasi Nexus");
