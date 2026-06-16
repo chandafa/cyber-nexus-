@@ -32,6 +32,7 @@ import { WAF } from "../pages/WAF";
 import { SystemHealth } from "../pages/SystemHealth";
 import { EbpfSecurity } from "../pages/EbpfSecurity";
 import { HumanElement } from "../pages/HumanElement";
+import { NexusAgents } from "../pages/NexusAgents";
 
 // Terminal interaktif + modul baru
 import { Shell } from "../pages/Shell";
@@ -76,6 +77,7 @@ export const router = createHashRouter([
       { path: "defense-suite", element: <DefenseSuite /> },
       { path: "waf", element: <WAF /> },
       { path: "human-element", element: <HumanElement /> },
+      { path: "nexus-agents", element: <NexusAgents /> },
       // Terminal interaktif + modul baru
       { path: "terminal", element: <Shell /> },
       { path: "dns-recon", element: <DnsRecon /> },

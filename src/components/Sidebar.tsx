@@ -78,6 +78,7 @@ const GROUPS: { title: string; icon: IconComp; items: NavItem[] }[] = [
     items: [
       { to: "/defense-monitor", label: "Defense Monitor", icon: Ic.defense },
       { to: "/defense-suite", label: "Defense Suite", icon: Ic.suite },
+      { to: "/nexus-agents", label: "Nexus Agents", icon: Ic.server },
       { to: "/ebpf-security", label: "eBPF Shield", icon: Ic.logo },
       { to: "/waf", label: "WAF", icon: Ic.mitigation },
       { to: "/human-element", label: "Human Element", icon: Ic.human },

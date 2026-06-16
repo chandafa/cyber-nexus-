@@ -27,7 +27,7 @@ use commands::ebpf::{
     clear_ids_alerts, set_ebpf_active, set_ebpf_interface, EbpfState,
 };
 use commands::nexus_listener::{
-    get_nexus_listener_status, start_nexus_listener, stop_nexus_listener, NexusAgentListenerState,
+    get_nexus_listener_status, start_nexus_listener, stop_nexus_listener, send_nexus_agent_command, NexusAgentListenerState,
 };
 use db::Db;
 
@@ -306,6 +306,7 @@ pub fn run() {
             get_nexus_listener_status,
             start_nexus_listener,
             stop_nexus_listener,
+            send_nexus_agent_command,
         ])
         .run(tauri::generate_context!())
         .expect("error saat menjalankan aplikasi Nexus");
