@@ -37,6 +37,10 @@ import { DirFuzzer } from "../pages/DirFuzzer";
 import { Listener } from "../pages/Listener";
 import { HashTool } from "../pages/HashTool";
 
+// Fleet / SOC (arsitektur agent <-> manager)
+import { FleetManager } from "../pages/FleetManager";
+import { FleetAgent } from "../pages/FleetAgent";
+
 export const router = createHashRouter([
   { path: "/setup", element: <SetupWizard /> },
   {
@@ -77,6 +81,10 @@ export const router = createHashRouter([
       { path: "dir-fuzzer", element: <DirFuzzer /> },
       { path: "listener", element: <Listener /> },
       { path: "hash-tool", element: <HashTool /> },
+
+      // Fleet / SOC
+      { path: "fleet-manager", element: <FleetManager /> },
+      { path: "fleet-agent", element: <FleetAgent /> },
     ],
   },
 ]);

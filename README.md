@@ -29,6 +29,7 @@ output realistis walau tool eksternalnya belum terpasang, jadi seluruh alur bisa
 | **Cloud & Container** | Container Scanner (Trivy) · Cloud Config Checker (Prowler) |
 | **Analisis** | Log Analyzer (anomaly detection) · Scan Diff / Compare |
 | **Defense & Laporan** | Defense Monitor · Defense Suite (firewall auto-rule, patch advisory, mitigasi) · Report Generator (PDF/HTML) |
+| **Fleet / SOC** | **Nexus Manager** (server pusat) · **Nexus Agent** (daemon endpoint) · **nexus-cli** (admin) — arsitektur agent↔manager ala-Wazuh |
 | **Sistem** | History · Scheduler (cron) · Wordlist Manager (SecLists) · Settings |
 
 **Lainnya:** Security Score Dashboard · Terminal live (xterm.js) · 8 tema (Dark/Light/Blue/Red/Black/Green/Purple/Nord) ·
@@ -47,6 +48,59 @@ sidebar collapse · export CSV ke folder pilihan · **installer tool 1-klik tanp
 └───────────────────────────────────────────────────────────┘
 ```
 Database: **SQLite** (rusqlite) · Report: **Python Jinja2 + WeasyPrint** (fallback HTML).
+
+### Mode Fleet / SOC (agent ↔ manager, ala-Wazuh)
+
+Selain mode desktop "klik-scan", Nexus punya arsitektur **fleet terdistribusi** untuk memantau banyak
+endpoint dari satu titik — komponen klasik Wazuh (agent + manager + dashboard + CLI):
+
+```
+   Endpoint A ─┐                                  ┌─ Dashboard (Fleet Manager page)
+   nexus-agent │   heartbeat + event (HTTP/HMAC)  │
+   Endpoint B ─┼────────────────────────────────► Nexus Manager ──► SQLite (agents, events, policy)
+   nexus-agent │   ◄── policy & perintah ──────── (server :8765)    ▲
+   Endpoint C ─┘                                                    └─ nexus-cli (admin via token)
+```
+
+**1 platform, 4 komponen** (monorepo) — kode kanonik stdlib-only di `python/fleet/`, dipakai ulang
+oleh desktop app (adapter tipis di `python/modules/fleet_*.py`) **dan** bisa jalan mandiri:
+
+| Komponen | Paket | Peran |
+|----------|-------|-------|
+| **nexus-manager** | `python/fleet/nexus_manager` | API server pusat: enrollment, heartbeat, ingest+normalisasi event, **rule engine + alert engine**, policy, audit, retention, report. |
+| **nexus-agent** | `python/fleet/nexus_agent` | Daemon endpoint ringan: heartbeat, **FIM**, SCA, software inventory, port/user/disk/firewall, **web-app audit (Laravel/.env)**, event queue store-and-forward. |
+| **nexus-cli** | `python/fleet/nexus_cli` | Console interaktif (menu Network & Website security) **+** admin: `agents/events/alerts/ack/report/policy/command`. |
+| **nexus-dashboard** | `python/fleet/nexus_dashboard` | UI web monitoring (alerts, agents, events, risk score) — disajikan manager di `/`. |
+| *shared* | `python/fleet/nexus_common` | Protokol HMAC + **skema baku event/alert/report** (OCSF-leaning, `origin: real\|demo`). |
+
+**Engine produk (deepening):**
+- **Rule engine** (`nexus_manager/rules.py`) — rule native ber-level 0–15 + **MITRE ATT&CK** + rekomendasi + response; pushable. Contoh: `NEXUS-FIM-001` (.env diubah → critical), `NEXUS-WEB-001` (Laravel APP_DEBUG), `NEXUS-AUTH-001` (brute-force).
+- **Alert engine** — event cocok rule → alert (severity/level), **dedup** anti-fatigue, ack/resolve, retensi.
+- **Real findings only** — setiap event ber-`origin`; manager **menolak `demo`** secara default (`accept_demo=0`).
+- **Skema konsisten** — `event_id/category/event_type/severity/host/target/evidence/rule.mitre`; report `nexus.report/v1`.
+
+**Keamanan transport:** pesan agent ditandatangani **HMAC-SHA256** per-agent; enrollment butuh **enrollment key**;
+API admin butuh **admin token**; CORS untuk dashboard. HTTP di LAN — **tidak ada data ke internet**.
+
+**Jalankan mandiri** (Python 3.8+, tanpa desktop app — `cd python/fleet`, atau `pip install .` / `npm i -g`):
+```bash
+python -m nexus_manager run --host 0.0.0.0 --port 8765    # server pusat + dashboard di :8765/
+python -m nexus_agent  enroll --host <mgr> --port 8765 --key <ENROLL_KEY> --labels prod,web
+python -m nexus_agent  start                              # daemon: FIM/SCA/inventory/webaudit
+python -m nexus_cli                                       # console interaktif (network & web)
+python -m nexus_cli --token <ADMIN_TOKEN> alerts          # admin: lihat alert
+python -m nexus_cli --token <ADMIN_TOKEN> report          # report konsisten + MITRE
+```
+Endpoint API: `POST /api/v1/agents/enroll · /agents/heartbeat · /events/batch`,
+`GET /api/v1/agents · /alerts · /events · /policies · /rules · /audit · /report`, `POST /alerts/ack`.
+
+Uji headless (21 seksi, semua lulus): `python python/tests/test_fleet.py`.
+
+> **Status & roadmap.** Yang ada sekarang = MVP fungsional & teruji dari fondasi ala-Wazuh
+> (FIM, SCA, inventory, rule/alert engine, MITRE, real-only, schema, agent↔manager↔cli↔dashboard).
+> **Belum** (roadmap menuju "standar industri penuh"): agent Go/Rust, OpenSearch/ClickHouse + Postgres,
+> mTLS/gRPC, import **Sigma**, **YARA**, Active Response eksekusi, OCSF penuh, AI remediation, RBAC multi-tenant.
+> Pembeda yang dikejar: **developer-first / app-aware** (audit Laravel/React/Next, parser log aplikasi, posture score).
 
 ---
 

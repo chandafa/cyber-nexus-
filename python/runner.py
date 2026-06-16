@@ -316,6 +316,99 @@ def dispatch(command: str, kwargs: dict) -> dict:
                                      kwargs.get('target', ''),
                                      kwargs.get('confirmed', 'false'))
 
+    # -------------------------------------------------- Fleet (agent <-> manager)
+    if command == 'manager_start':
+        from modules import fleet_manager
+        host = kwargs.get('host', '127.0.0.1')
+        port = kwargs.get('port', '8765')
+        if str(kwargs.get('foreground', '')).lower() in ('1', 'true', 'yes'):
+            return fleet_manager.run_foreground(host=host, port=port)
+        return fleet_manager.run(host=host, port=port)
+
+    if command == 'manager_status':
+        from modules import fleet_manager
+        return fleet_manager.manager_status(kwargs.get('host', '127.0.0.1'),
+                                            kwargs.get('port', '8765'))
+
+    if command == 'fleet_agents':
+        from modules import fleet_manager
+        return fleet_manager.list_agents()
+
+    if command == 'fleet_events':
+        from modules import fleet_manager
+        return fleet_manager.list_events(int(kwargs.get('limit', 200)),
+                                         kwargs.get('agent_id', ''),
+                                         kwargs.get('severity', ''))
+
+    if command == 'fleet_stats':
+        from modules import fleet_manager
+        return fleet_manager.stats()
+
+    if command == 'fleet_alerts':
+        from modules import fleet_manager
+        return fleet_manager.list_alerts(int(kwargs.get('limit', 200)),
+                                         kwargs.get('status', ''),
+                                         kwargs.get('severity', ''),
+                                         int(kwargs.get('min_level', 0)))
+
+    if command == 'fleet_alert_ack':
+        from modules import fleet_manager
+        return fleet_manager.ack_alert(kwargs.get('id', ''), kwargs.get('status', 'ack'))
+
+    if command == 'fleet_rules_get':
+        from modules import fleet_manager
+        return {'module': 'fleet_manager', 'rules': fleet_manager.get_rules()}
+
+    if command == 'fleet_rules_set':
+        from modules import fleet_manager
+        return fleet_manager.set_rules(kwargs.get('rules', '[]'))
+
+    if command == 'fleet_audit':
+        from modules import fleet_manager
+        return fleet_manager.list_audit(int(kwargs.get('limit', 200)))
+
+    if command == 'fleet_report':
+        from modules import fleet_manager
+        return fleet_manager.report(kwargs.get('scope', 'fleet'))
+
+    if command == 'fleet_policy_get':
+        from modules import fleet_manager
+        return fleet_manager.get_policy()
+
+    if command == 'fleet_policy_set':
+        from modules import fleet_manager
+        return fleet_manager.set_policy(kwargs.get('policy', '{}'))
+
+    if command == 'fleet_command':
+        from modules import fleet_manager
+        import json as _json
+        try:
+            cargs = _json.loads(kwargs.get('args', '{}') or '{}')
+        except Exception:
+            cargs = {}
+        return fleet_manager.queue_command(kwargs.get('agent_id', ''),
+                                           kwargs.get('cmd', ''), cargs)
+
+    if command == 'agent_enroll':
+        from modules import fleet_agent
+        return fleet_agent.enroll(kwargs.get('host', '127.0.0.1'),
+                                  kwargs.get('port', '8765'),
+                                  kwargs.get('enroll_key', ''),
+                                  kwargs.get('name', ''),
+                                  kwargs.get('labels', ''))
+
+    if command == 'agent_start':
+        from modules import fleet_agent
+        return fleet_agent.run_foreground()
+
+    if command == 'agent_status':
+        from modules import fleet_agent
+        return fleet_agent.status()
+
+    if command == 'agent_reset':
+        from modules import fleet_agent
+        return fleet_agent.reset()
+
     # -------------------------------------------------- backend WSL
     if command == 'wsl_status':
         from core import wsl_backend

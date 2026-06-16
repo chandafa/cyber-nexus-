@@ -1,0 +1,45 @@
+# python/fleet/pyproject.toml — distribusi PyPI untuk komponen Nexus Fleet.
+#
+#   pip install nexus-fleet                 (atau: pipx install nexus-fleet)
+#   pip install git+https://github.com/<you>/nexus-fleet
+#
+# Memasang 4 perintah berdiri-sendiri:
+#   nexus-manager · nexus-agent · nexus-cli · nexus-dashboard
+# Hanya stdlib — agent tetap ringan untuk endpoint.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nexus-fleet"
+version = "1.0.0"
+description = "Nexus Fleet — agent/manager/cli/dashboard keamanan endpoint (ala-Wazuh, ringan, stdlib-only)"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "Nexus Security" }]
+keywords = ["security", "soc", "edr", "agent", "manager", "monitoring", "wazuh", "fleet"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Topic :: Security",
+  "Environment :: Console",
+]
+dependencies = []   # stdlib-only by design
+
+[project.urls]
+Homepage = "https://github.com/your-org/nexus-fleet"
+Issues = "https://github.com/your-org/nexus-fleet/issues"
+
+[project.scripts]
+nexus-manager = "nexus_manager.__main__:main"
+nexus-agent = "nexus_agent.__main__:main"
+nexus-cli = "nexus_cli.__main__:main"
+nexus-dashboard = "nexus_dashboard.server:main"
+
+[tool.setuptools]
+packages = ["nexus_common", "nexus_manager", "nexus_agent", "nexus_cli", "nexus_dashboard"]
+
+[tool.setuptools.package-data]
+nexus_dashboard = ["*.html", "*.css", "*.js"]
