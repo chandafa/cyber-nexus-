@@ -23,5 +23,11 @@
   "scripts": {
     "postinstall": "node bin/_check-python.js"
   },
-  "repository": { "type": "git", "url": "https://github.com/your-org/nexus-fleet" }
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chandafa/cyber-nexus-.git",
+    "directory": "python/fleet"
+  },
+  "homepage": "https://github.com/chandafa/cyber-nexus-#readme",
+  "bugs": { "url": "https://github.com/chandafa/cyber-nexus-/issues" }
 }

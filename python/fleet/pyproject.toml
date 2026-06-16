@@ -29,8 +29,8 @@ classifiers = [
 dependencies = []   # stdlib-only by design
 
 [project.urls]
-Homepage = "https://github.com/your-org/nexus-fleet"
-Issues = "https://github.com/your-org/nexus-fleet/issues"
+Homepage = "https://github.com/chandafa/cyber-nexus-"
+Issues = "https://github.com/chandafa/cyber-nexus-/issues"
 
 [project.scripts]
 nexus-manager = "nexus_manager.__main__:main"

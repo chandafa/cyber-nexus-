@@ -34,7 +34,8 @@ jobs:
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: twine upload --non-interactive dist/*
+        # --skip-existing: aman bila versi sudah ada (re-run idempotent)
+        run: twine upload --non-interactive --skip-existing dist/*
 
   npm:
     runs-on: ubuntu-latest
