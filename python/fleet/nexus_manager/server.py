@@ -46,6 +46,8 @@ DEFAULT_POLICY = {
     "fim_paths": [],
     # Web/app audit — root project Laravel/Node yang dicek (.env, APP_DEBUG, dll).
     "webaudit_paths": [],
+    # Active Response: false = DRY-RUN (hanya log), true = eksekusi blokir nyata.
+    "active_response": False,
     "min_report_severity": "info",
 }
 
@@ -416,12 +418,19 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(*_set_policy_api(body))
         if path == "/command":
             return self._send(*_queue_command_api(body))
-        if path in ("/alerts/ack", "/response/actions"):
+        if path == "/alerts/ack":
             r = ack_alert(body.get("id", ""), body.get("status", "ack"),
                           body.get("actor", "admin"))
             return self._send(200 if r.get("ok") else 400, r)
+        if path == "/response/actions":
+            r = response_action(body.get("agent_id", ""), body.get("action", ""),
+                                body.get("ip", ""), body.get("target", ""))
+            return self._send(200 if r.get("ok") else 400, r)
         if path == "/rules":
             r = set_rules(body.get("rules", []))
+            return self._send(200 if r.get("ok") else 400, r)
+        if path == "/rules/sigma":
+            r = import_sigma(body.get("sigma", body))
             return self._send(200 if r.get("ok") else 400, r)
         return self._send(404, {"error": "endpoint tidak dikenal"})
 
@@ -567,6 +576,34 @@ def ack_alert(alert_id, status="ack", actor="admin") -> dict:
     return {"ok": True, "id": alert_id, "status": status}
 
 
+def import_sigma(sigma_json, actor="admin") -> dict:
+    """Konversi rule Sigma (JSON) -> rule native & tambahkan ke ruleset."""
+    from nexus_manager import sigma as sigmod
+    init_db()
+    try:
+        data = json.loads(sigma_json) if isinstance(sigma_json, str) else sigma_json
+    except Exception as e:
+        return {"ok": False, "error": f"Sigma JSON tidak valid: {e}"}
+    native = sigmod.convert_many(data)
+    if not native:
+        return {"ok": False, "error": "tidak ada rule Sigma yang valid"}
+    rules = get_rules()
+    ids = {r.get("id") for r in rules}
+    added = [r for r in native if r["id"] not in ids]
+    rules.extend(added)
+    _set_cfg("rules", json.dumps(rules))
+    _audit(actor, "rules:import_sigma", f"{len(added)} rule ditambah")
+    return {"ok": True, "imported": len(added), "total_rules": len(rules)}
+
+
+def response_action(agent_id, action, ip="", target="", actor="admin") -> dict:
+    """Active Response: antri perintah respon ke agent (eksekusi dgn dry-run default)."""
+    r = queue_command(agent_id, "respond", {"action": action, "ip": ip, "target": target})
+    if r.get("ok"):
+        _audit(actor, "response:" + action, f"{agent_id} {ip or target}")
+    return r
+
+
 def set_rules(rules_json, actor="admin") -> dict:
     init_db()
     try:
@@ -588,13 +625,55 @@ def list_audit(limit=200) -> dict:
                        "action": r["action"], "detail": r["detail"]} for r in rows]}
 
 
+def _domain_for(rule_id: str) -> str:
+    if rule_id.startswith("NEXUS-WEB"):
+        return "web"
+    if rule_id.startswith("NEXUS-NET"):
+        return "network"
+    return "server"
+
+
+def posture(agent_id: str = "") -> dict:
+    """Security posture score 0-100 (overall + per-domain) dari alert open.
+    Mudah dipahami founder/manajer: makin tinggi makin aman."""
+    init_db()
+    c = _conn()
+    q = "SELECT rule_id, level FROM alerts WHERE status!='resolved'"
+    params = []
+    if agent_id:
+        q += " AND agent_id=?"; params.append(agent_id)
+    rows = c.execute(q, params).fetchall()
+    c.close()
+    domains = {"network": 100.0, "server": 100.0, "web": 100.0}
+    overall = 100.0
+    for r in rows:
+        # penalti progresif berdasarkan level (0-15)
+        pen = (r["level"] or 0) * 1.5
+        d = _domain_for(r["rule_id"] or "")
+        domains[d] = max(0.0, domains[d] - pen)
+        overall = max(0.0, overall - pen * 0.8)
+    label = lambda s: ("baik" if s >= 80 else "perlu perhatian" if s >= 50 else "kritis")
+    return {
+        "overall": round(overall),
+        "label": label(overall),
+        "scores": {
+            "network_security": round(domains["network"]),
+            "server_hardening": round(domains["server"]),
+            "website_security": round(domains["web"]),
+        },
+        "open_alerts": len(rows),
+    }
+
+
 def report(scope="fleet", limit=1000) -> dict:
     """Bangun report konsisten (schema nexus.report/v1) dari alert+event+agent."""
     init_db()
     alerts = list_alerts(limit)["alerts"]
     events = list_events(limit)["events"]
     agents = list_agents()["agents"]
-    return schema.build_report(scope, alerts, events, agents)
+    rep = schema.build_report(scope, alerts, events, agents)
+    rep["posture"] = posture()
+    return rep
 
 
 def _safe_json(s):
@@ -654,7 +733,7 @@ def stats() -> dict:
     return {"module": "fleet_manager", "agents_total": total, "agents_online": online,
             "agents_offline": total - online, "events_total": ev_total,
             "events_by_severity": by_sev, "alerts_total": al_total, "alerts_open": al_open,
-            "alerts_by_severity": al_by_sev, "risk_score": risk}
+            "alerts_by_severity": al_by_sev, "risk_score": risk, "posture": posture()}
 
 
 def _probe_running(host, port):

@@ -182,6 +182,46 @@ def main():
     check("audit recorded enroll+ack", any(a["action"] == "enroll" for a in aud)
           and any(a["action"].startswith("alert:") for a in aud))
 
+    print("== 21. Web/app-aware rule (weak DB password) ==")
+    ingest([{"type": "webaudit", "severity": "high", "event_type": "weak_db_password",
+             "title": "DB_PASSWORD lemah", "target": {"path": "/srv/app/.env"}, "origin": "real"}])
+    web = [a for a in mgr.list_alerts(100)["alerts"] if a["rule_id"] == "NEXUS-WEB-003"]
+    check("NEXUS-WEB-003 fired", len(web) == 1)
+
+    print("== 22. Security posture score ==")
+    p = mgr.posture()
+    check("overall score 0-100", 0 <= p["overall"] <= 100)
+    check("has website/server/network scores", set(p["scores"]) ==
+          {"network_security", "server_hardening", "website_security"})
+    check("website score reduced by web alert", p["scores"]["website_security"] < 100)
+
+    print("== 23. Sigma import -> native rule ==")
+    sigma = {"title": "Sensitive env file access", "id": "SIG-ENV-001", "level": "high",
+             "tags": ["attack.t1552.001", "attack.credential-access"],
+             "logsource": {"category": "file_event"},
+             "detection": {"selection": {"TargetFilename|endswith": ".env"},
+                           "condition": "selection"}}
+    n_before = len(mgr.get_rules())
+    r = mgr.import_sigma(json.dumps(sigma))
+    check("sigma imported", r.get("ok") and r.get("imported") == 1)
+    check("rules grew", len(mgr.get_rules()) == n_before + 1)
+    conv = [x for x in mgr.get_rules() if x["id"] == "SIG-ENV-001"][0]
+    check("sigma mitre mapped", "T1552.001" in conv["mitre"])
+    check("sigma condition mapped", conv["conditions"].get("target.path", {}).get("ends_with") == ".env")
+
+    print("== 24. Active Response (dry-run default) ==")
+    qn = agt._queue_size()
+    agt._active_response({"action": "block_ip", "ip": "203.0.113.5"})
+    check("response event enqueued", agt._queue_size() == qn + 1)
+    last = agt._conn().execute("SELECT payload FROM queue ORDER BY id DESC LIMIT 1").fetchone()[0]
+    ev = json.loads(last)
+    check("dry-run not executed", ev["data"]["executed"] is False)
+    check("response event_type", ev["event_type"] == "active_response")
+
+    print("== 25. response_action queues agent command ==")
+    rr = mgr.response_action(agent_id, "block_ip", ip="203.0.113.9")
+    check("respond command queued", rr.get("ok") is True)
+
     mgr.stop()
     print()
     if FAILED:

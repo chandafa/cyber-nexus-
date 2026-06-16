@@ -226,12 +226,46 @@ def _flush_queue():
     return len(ids)
 
 
+def _active_response(args):
+    """Active Response (item Active Response). DEFAULT DRY-RUN untuk keamanan/etika:
+    hanya jalankan blokir nyata bila policy `active_response` diaktifkan."""
+    import subprocess
+    action = args.get("action", "")
+    ip = args.get("ip", "") or args.get("target", "")
+    enabled = str(_policy().get("active_response", "")).lower() in ("1", "true", "yes")
+    executed = False
+    if action == "block_ip" and ip:
+        if enabled:
+            try:
+                if __import__("platform").system() == "Windows":
+                    cmd = ["netsh", "advfirewall", "firewall", "add", "rule",
+                           f"name=NexusBlock-{ip}", "dir=in", "action=block", f"remoteip={ip}"]
+                else:
+                    cmd = ["iptables", "-A", "INPUT", "-s", ip, "-j", "DROP"]
+                subprocess.run(cmd, capture_output=True, timeout=10)
+                executed = True
+                log(f"[AGENT] Active Response: IP {ip} DIBLOKIR di firewall.")
+            except Exception as e:
+                log(f"[AGENT] Active Response gagal: {e}")
+        else:
+            log(f"[AGENT] (DRY-RUN) block_ip {ip} — aktifkan policy.active_response utk eksekusi.")
+    else:
+        log(f"[AGENT] Active Response: aksi '{action}' tidak dikenal/lengkap.")
+    _enqueue([{"type": "response", "severity": "medium", "event_type": "active_response",
+               "title": f"Active Response: {action} {ip} ({'executed' if executed else 'dry-run'})",
+               "detail": f"action={action} ip={ip} executed={executed}",
+               "target": {"ip": ip}, "data": {"action": action, "executed": executed},
+               "origin": "real", "source": "response"}])
+
+
 def _handle_commands(cmds):
     for cmd in cmds:
         name = cmd.get("command")
         if name == "collect_now":
             _enqueue(collect_all())
             log("[AGENT] Perintah collect_now dijalankan.")
+        elif name == "respond":
+            _active_response(cmd.get("args") or {})
         elif name == "ping":
             log("[AGENT] Perintah ping diterima dari manager.")
         elif name == "set_name":

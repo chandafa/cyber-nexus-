@@ -227,37 +227,85 @@ def c_sca(policy):
     return out
 
 
+def _env_kv(content):
+    kv = {}
+    for line in content.splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            kv[k.strip().upper()] = v.strip().strip('"').strip("'")
+    return kv
+
+
 def c_webaudit(policy):
-    """PEMBEDA developer-first: audit project web (Laravel/Node) di webaudit_paths.
-    Cek .env terekspos & APP_DEBUG=true."""
+    """PEMBEDA developer-first: audit project web (Laravel/React/Next) di webaudit_paths.
+    Cek konfigurasi tidak aman yang spesifik aplikasi — yang tidak dilihat EDR umum."""
     out = []
+
+    def add(sev, etype, title, path, detail="", data=None):
+        out.append({"type": "webaudit", "severity": sev, "event_type": etype,
+                    "title": title, "detail": detail or title,
+                    "target": {"path": path}, "data": data or {}})
+
     for root in policy.get("webaudit_paths", []) or []:
+        if not os.path.isdir(root):
+            continue
         env_path = os.path.join(root, ".env")
-        if not os.path.isfile(env_path):
-            continue
-        try:
-            with open(env_path, encoding="utf-8", errors="replace") as f:
-                content = f.read()
-        except Exception:
-            continue
-        if "app_debug=true" in content.lower().replace(" ", ""):
-            out.append({"type": "webaudit", "severity": "high",
-                        "event_type": "app_debug_enabled",
-                        "title": "Laravel APP_DEBUG=true terdeteksi",
-                        "detail": f"{env_path}: APP_DEBUG aktif — bocorkan stack trace di produksi.",
-                        "target": {"path": env_path}, "data": {"framework": "laravel"}})
-        try:
-            mode = os.stat(env_path).st_mode
-            if platform.system() != "Windows" and (mode & 0o004):
-                out.append({"type": "webaudit", "severity": "high",
-                            "event_type": "file_modified", "title": ".env world-readable",
-                            "detail": f"{env_path} dapat dibaca semua user (chmod 600).",
-                            "target": {"path": env_path}, "data": {}})
-        except Exception:
-            pass
-        out.append({"type": "webaudit", "severity": "info", "event_type": "config_found",
-                    "title": "File .env ditemukan", "detail": env_path,
-                    "target": {"path": env_path}, "data": {}})
+
+        # --- Laravel / .env ---
+        if os.path.isfile(env_path):
+            try:
+                content = open(env_path, encoding="utf-8", errors="replace").read()
+            except Exception:
+                content = ""
+            kv = _env_kv(content)
+            add("info", "config_found", "File .env ditemukan", env_path)
+            if kv.get("APP_DEBUG", "").lower() == "true":
+                add("high", "app_debug_enabled", "Laravel APP_DEBUG=true di produksi", env_path,
+                    "Bocorkan stack trace & config sensitif.", {"framework": "laravel"})
+            if kv.get("APP_ENV", "").lower() in ("local", "development", "dev"):
+                add("medium", "app_env_nonprod", f"APP_ENV={kv.get('APP_ENV')} (bukan production)",
+                    env_path, "Set APP_ENV=production untuk deployment live.")
+            if "APP_KEY" in kv and not kv.get("APP_KEY"):
+                add("high", "app_key_missing", "APP_KEY kosong", env_path,
+                    "Jalankan `php artisan key:generate`; enkripsi/session rentan.")
+            if kv.get("DB_PASSWORD", "") in ("", "root", "password", "secret", "123456"):
+                add("high", "weak_db_password", "DB_PASSWORD lemah/kosong", env_path,
+                    "Gunakan password DB kuat & unik.")
+            # Node/Next secret yang bocor ke client
+            for k in kv:
+                if k.startswith("NEXT_PUBLIC_") and any(s in k for s in ("SECRET", "KEY", "TOKEN", "PASSWORD")):
+                    add("high", "public_secret_exposed", f"Secret terekspos ke client: {k}", env_path,
+                        "Variabel NEXT_PUBLIC_* terbundel ke JS browser — jangan taruh rahasia.",
+                        {"framework": "nextjs", "var": k})
+            # perms .env (Unix)
+            try:
+                if platform.system() != "Windows" and (os.stat(env_path).st_mode & 0o004):
+                    add("high", "env_world_readable", ".env world-readable", env_path,
+                        "chmod 600 .env; saat ini dapat dibaca semua user.")
+            except Exception:
+                pass
+
+        # --- .git terekspos di webroot ---
+        for sub in ("public/.git", ".git"):
+            gp = os.path.join(root, sub)
+            if os.path.isdir(gp) and sub.startswith("public"):
+                add("high", "git_exposed", "Direktori .git terekspos di webroot", gp,
+                    "Source code & history bisa diunduh; pindahkan keluar dari public/.")
+
+        # --- source map terbundel (kebocoran source) ---
+        maps = 0
+        for d in ("build", "dist", ".next", "public"):
+            dd = os.path.join(root, d)
+            if os.path.isdir(dd):
+                for r, _x, names in os.walk(dd):
+                    maps += sum(1 for n in names if n.endswith(".js.map"))
+                    if maps > 200:
+                        break
+        if maps:
+            add("medium", "sourcemap_exposed", f"{maps} source map (.js.map) terdeteksi",
+                root, "Nonaktifkan source map produksi agar source tak terekspos.",
+                {"count": maps})
     return out
 
 

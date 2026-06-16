@@ -371,6 +371,20 @@ def dispatch(command: str, kwargs: dict) -> dict:
         from modules import fleet_manager
         return fleet_manager.report(kwargs.get('scope', 'fleet'))
 
+    if command == 'fleet_posture':
+        from modules import fleet_manager
+        return {'module': 'fleet_manager', 'posture': fleet_manager.posture(kwargs.get('agent_id', ''))}
+
+    if command == 'fleet_sigma_import':
+        from modules import fleet_manager
+        return fleet_manager.import_sigma(kwargs.get('sigma', '[]'))
+
+    if command == 'fleet_respond':
+        from modules import fleet_manager
+        return fleet_manager.response_action(kwargs.get('agent_id', ''),
+                                             kwargs.get('action', ''),
+                                             kwargs.get('ip', ''), kwargs.get('target', ''))
+
     if command == 'fleet_policy_get':
         from modules import fleet_manager
         return fleet_manager.get_policy()
