@@ -86,6 +86,14 @@ const GROUPS: { title: string; icon: IconComp; items: NavItem[] }[] = [
     ],
   },
   {
+    title: "Fleet / SOC",
+    icon: Ic.server,
+    items: [
+      { to: "/fleet-manager", label: "Fleet Manager (Server)", icon: Ic.server },
+      { to: "/fleet-agent", label: "Fleet Agent (Endpoint)", icon: Ic.suite },
+    ],
+  },
+  {
     title: "Sistem",
     icon: Ic.settings,
     items: [

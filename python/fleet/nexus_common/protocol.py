@@ -1,0 +1,158 @@
+# nexus_common/protocol.py
+"""
+Protokol bersama Nexus Fleet (agent <-> manager <-> cli <-> dashboard).
+
+Stdlib-only (tidak ada dependency eksternal) sehingga komponen agent bisa
+disalin ke endpoint mana pun yang punya Python 3.8+ tanpa pip install.
+
+Keamanan:
+  - Transport HTTP JSON di localhost/LAN — TIDAK ke internet.
+  - Pesan agent ditandatangani HMAC-SHA256 dgn kunci per-agent.
+  - Enrollment butuh enrollment key; API admin butuh admin token.
+"""
+import hashlib
+import hmac
+import json
+import os
+import platform
+import socket
+import time
+import uuid
+import urllib.request
+import urllib.error
+
+API_VERSION = "v1"
+DEFAULT_MANAGER_HOST = "127.0.0.1"
+DEFAULT_MANAGER_PORT = 8765
+HEARTBEAT_INTERVAL = 30          # detik antar-heartbeat (default policy)
+COLLECT_INTERVAL = 120           # detik antar-siklus pengumpulan telemetri
+OFFLINE_AFTER = 90               # detik tanpa heartbeat -> dianggap offline
+
+SEVERITIES = ("info", "low", "medium", "high", "critical")
+
+
+# --------------------------------------------------------------------------- paths
+def _data_dir() -> str:
+    db = os.environ.get("NEXUS_DB_PATH", "")
+    if db:
+        d = os.path.dirname(os.path.abspath(db))
+        if d:
+            return d
+    # Default: folder kerja proses (cocok untuk deploy standalone).
+    return os.environ.get("NEXUS_FLEET_HOME") or os.getcwd()
+
+
+def manager_db_path() -> str:
+    return os.environ.get("NEXUS_FLEET_DB") or os.path.join(_data_dir(), "fleet_manager.db")
+
+
+def agent_state_path() -> str:
+    return os.environ.get("NEXUS_AGENT_DB") or os.path.join(_data_dir(), "fleet_agent.db")
+
+
+# --------------------------------------------------------------------------- util
+def now() -> int:
+    return int(time.time())
+
+
+def iso(ts: int) -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts)) if ts else "—"
+
+
+def new_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:12]}"
+
+
+def gen_key() -> str:
+    return uuid.uuid4().hex + uuid.uuid4().hex
+
+
+def host_fingerprint() -> dict:
+    return {
+        "hostname": socket.gethostname(),
+        "os": platform.system() or "Unknown",
+        "os_release": platform.release(),
+        "os_version": platform.version(),
+        "arch": platform.machine(),
+        "python": platform.python_version(),
+    }
+
+
+def local_ip() -> str:
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return ""
+
+
+def canonical(body: dict) -> bytes:
+    return json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def sign(key: str, raw: bytes) -> str:
+    return hmac.new(key.encode("utf-8"), raw, hashlib.sha256).hexdigest()
+
+
+def verify(key: str, raw: bytes, sig: str) -> bool:
+    try:
+        return hmac.compare_digest(sign(key, raw), sig or "")
+    except Exception:
+        return False
+
+
+def manager_url(host: str, port, path: str = "") -> str:
+    base = f"http://{host}:{int(port)}/api/{API_VERSION}"
+    if not path:
+        return base
+    return base + (path if path.startswith("/") else "/" + path)
+
+
+# --------------------------------------------------------------------------- HTTP client (stdlib)
+class HttpError(Exception):
+    def __init__(self, status: int, body: str):
+        super().__init__(f"HTTP {status}: {body}")
+        self.status = status
+        self.body = body
+
+
+def _request(method: str, url: str, raw: bytes = b"", headers=None, timeout=15) -> dict:
+    req = urllib.request.Request(url, data=(raw if method == "POST" else None), method=method)
+    req.add_header("Content-Type", "application/json")
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = r.read().decode("utf-8", "replace")
+            return json.loads(data) if data.strip() else {}
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", "replace")
+        except Exception:
+            pass
+        raise HttpError(e.code, body)
+
+
+def post_signed(url: str, body: dict, agent_id: str, agent_key: str, timeout=15) -> dict:
+    raw = canonical(body)
+    return _request("POST", url, raw, {
+        "X-Agent-Id": agent_id,
+        "X-Signature": sign(agent_key, raw),
+    }, timeout)
+
+
+def post_enroll(url: str, body: dict, enroll_key: str, timeout=15) -> dict:
+    raw = canonical(body)
+    return _request("POST", url, raw, {"X-Enroll-Signature": sign(enroll_key, raw)}, timeout)
+
+
+def get_admin(url: str, admin_token: str = "", timeout=15) -> dict:
+    return _request("GET", url, b"", {"X-Admin-Token": admin_token}, timeout)
+
+
+def post_admin(url: str, body: dict, admin_token: str = "", timeout=15) -> dict:
+    return _request("POST", url, canonical(body), {"X-Admin-Token": admin_token}, timeout)
