@@ -106,6 +106,21 @@ export const FleetManager: React.FC = () => {
     toast(`${label} disalin.`, { kind: "success" });
   };
 
+  const removeAgent = async (agentId: string) => {
+    if (!window.confirm(`Hapus agent ${agentId} dari manager? Ini akan membebaskan seat lisensi.`)) return;
+    try {
+      const res = await runToolJson("fleet_remove_agent", buildArgs({ agent_id: agentId, purge: "true" }));
+      if (res.ok) {
+        toast(`Agent ${agentId} berhasil dihapus.`, { kind: "success" });
+        refresh();
+      } else {
+        toast(res.error || "Gagal menghapus agent.", { kind: "error" });
+      }
+    } catch (err: any) {
+      toast(err.message || String(err), { kind: "error" });
+    }
+  };
+
   useEffect(() => {
     refresh();
     const t = setInterval(refresh, 4000);
@@ -150,6 +165,67 @@ export const FleetManager: React.FC = () => {
         <p className="text-[10.5px] text-nexus-subtle">
           Masukkan Manager host:port + Enrollment Key ini di halaman <b>Fleet Agent</b> pada endpoint.
         </p>
+      </div>
+
+      {/* Lisensi / Freemium Card */}
+      <div className="border border-nexus-hairline rounded p-3 bg-nexus-panel/50 space-y-2.5">
+        <h4 className="text-xs font-semibold text-nexus-text flex items-center justify-between">
+          <span className="flex items-center gap-1.5">
+            <Ic.password className="h-3.5 w-3.5 text-yellow-400" /> Lisensi & Tier
+          </span>
+          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${
+            status?.license?.tier === "enterprise"
+              ? "bg-purple-950/40 text-purple-300 border-purple-800"
+              : status?.license?.tier === "pro"
+              ? "bg-blue-950/40 text-blue-300 border-blue-800"
+              : "bg-nexus-surface text-nexus-muted border-nexus-border"
+          }`}>
+            {status?.license?.tier || "FREE"}
+          </span>
+        </h4>
+        
+        {status?.license?.tier && status.license.tier !== "free" && (
+          <div className="text-[11px] space-y-1 font-mono text-nexus-muted">
+            <div>Pemilik: <span className="text-nexus-text">{status.license.licensee}</span></div>
+            <div>Batas Agent: <span className="text-nexus-text">{status.license.max_agents === 999 ? "Tanpa Batas" : `${status.license.max_agents} seat`}</span></div>
+          </div>
+        )}
+
+        <div className="space-y-1.5">
+          <label className="text-[10px] uppercase text-nexus-muted">Terapkan Token Lisensi</label>
+          <div className="flex gap-1.5">
+            <input 
+              type="text" 
+              placeholder="Masukkan token PRO/ENTERPRISE..." 
+              className="nx-input flex-1 font-mono text-xs px-2 py-1"
+              id="license-token-input"
+            />
+            <button 
+              onClick={async () => {
+                const el = document.getElementById("license-token-input") as HTMLInputElement;
+                const token = el?.value?.trim() || "";
+                if (!token) {
+                  if (!window.confirm("Kosongkan token lisensi untuk kembali ke tier FREE?")) return;
+                }
+                try {
+                  const res = await runToolJson("fleet_license_apply", buildArgs({ token }));
+                  if (res.ok) {
+                    toast(`Lisensi ${res.tier.toUpperCase()} berhasil diterapkan!`, { kind: "success" });
+                    if (el) el.value = "";
+                    refresh();
+                  } else {
+                    toast(res.error || "Gagal menerapkan lisensi.", { kind: "error" });
+                  }
+                } catch (err: any) {
+                  toast(err.message || String(err), { kind: "error" });
+                }
+              }}
+              className="nx-btn-ghost text-xs px-3"
+            >
+              Apply
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Stat cards */}
@@ -219,9 +295,12 @@ export const FleetManager: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-2 py-1.5 text-[11px]">{a.last_seen_iso}</td>
-                      <td className="px-2 py-1.5">
-                        <button className="text-nexus-accent hover:brightness-110 text-[11px]" onClick={() => sendCommand(a.agent_id, "collect_now")}>
+                      <td className="px-2 py-1.5 whitespace-nowrap">
+                        <button className="text-nexus-accent hover:brightness-110 text-[11px] mr-2" onClick={() => sendCommand(a.agent_id, "collect_now")}>
                           Scan now
+                        </button>
+                        <button className="text-red-400 hover:text-red-300 text-[11px]" onClick={() => removeAgent(a.agent_id)}>
+                          Hapus
                         </button>
                       </td>
                     </tr>
