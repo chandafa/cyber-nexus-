@@ -3,6 +3,21 @@
 All notable changes to **Nexus Fleet** (`nexus-fleet`) are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.9] — 2026-06
+### Fixed / Improved
+- **Correct authz status** — authenticated-but-unauthorized (viewer) writes return **403** (not 401).
+- **CVE version ranges** — DB entries support `introduced..fixed` ranges (closer to OSV/CPE);
+  `nexus-manager vuln-import --file feed.json` loads an offline CVE database.
+- **mTLS** — the manager can require agent **client certificates** (`NEXUS_TLS_CLIENT_CA`;
+  agent uses `NEXUS_CLIENT_CERT`/`NEXUS_CLIENT_KEY`).
+- **Wider at-rest encryption** — per-agent `agent_key` is now encrypted (with config secrets) when
+  `NEXUS_MASTER_KEY` is set.
+- **Concurrency (HA step)** — SQLite **WAL** mode + busy-timeout. *(True clustering needs an external
+  database — roadmap.)*
+
+### Roadmap (not yet)
+Full CPE/NVD feed with online auto-update, full-database encryption (SQLCipher), multi-node HA cluster.
+
 ## [1.0.8] — 2026-06
 ### Fixed / Improved (from real-usage audit)
 - **Specific alert titles** — alerts now show the event's specific finding (CVE/port/process), not

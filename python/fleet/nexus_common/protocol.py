@@ -117,10 +117,12 @@ def manager_url(host: str, port, path: str = "", scheme: str = "http") -> str:
 _CLIENT_CTX = None
 
 
-def set_client_tls(cafile: str = "", insecure: bool = False):
-    """Konfigurasi verifikasi TLS klien (agent). cafile = cert manager yang di-pin."""
+def set_client_tls(cafile: str = "", insecure: bool = False,
+                   clientcert: str = "", clientkey: str = ""):
+    """Konfigurasi TLS klien (agent). cafile = cert manager yang di-pin;
+    clientcert/clientkey = sertifikat klien untuk **mTLS**."""
     global _CLIENT_CTX
-    if not cafile and not insecure:
+    if not cafile and not insecure and not clientcert:
         _CLIENT_CTX = None
         return
     ctx = ssl.create_default_context()
@@ -129,6 +131,8 @@ def set_client_tls(cafile: str = "", insecure: bool = False):
     if insecure:
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
+    if clientcert and clientkey:
+        ctx.load_cert_chain(clientcert, clientkey)   # mTLS: agent presentasikan cert
     _CLIENT_CTX = ctx
 
 

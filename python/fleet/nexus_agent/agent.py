@@ -250,10 +250,13 @@ def _pin_path():
 
 
 def _ensure_tls():
-    """Muat sertifikat manager yang di-pin (TOFU) bila skema HTTPS."""
+    """Muat sertifikat manager yang di-pin (TOFU) + sertifikat klien (mTLS) bila HTTPS."""
     if _get("manager_scheme", "http") == "https":
         pin = _pin_path()
-        fc.set_client_tls(cafile=pin if os.path.isfile(pin) else "", insecure=not os.path.isfile(pin))
+        fc.set_client_tls(cafile=pin if os.path.isfile(pin) else "",
+                          insecure=not os.path.isfile(pin),
+                          clientcert=os.environ.get("NEXUS_CLIENT_CERT", ""),
+                          clientkey=os.environ.get("NEXUS_CLIENT_KEY", ""))
 
 
 def _murl(path):
@@ -276,8 +279,11 @@ def enroll(manager_host, manager_port, enroll_key, name="", labels=None, tls=Fal
         try:
             with open(_pin_path(), "w", encoding="utf-8") as f:
                 f.write(fc.fetch_server_cert(manager_host, manager_port))
-            fc.set_client_tls(cafile=_pin_path())
-            log("[AGENT] Sertifikat manager di-pin (TLS TOFU).")
+            fc.set_client_tls(cafile=_pin_path(),
+                              clientcert=os.environ.get("NEXUS_CLIENT_CERT", ""),
+                              clientkey=os.environ.get("NEXUS_CLIENT_KEY", ""))
+            log("[AGENT] Sertifikat manager di-pin (TLS TOFU)"
+                + (" + sertifikat klien (mTLS)" if os.environ.get("NEXUS_CLIENT_CERT") else "") + ".")
         except Exception as e:
             return {"module": "fleet_agent", "ok": False, "error": f"gagal pin TLS cert: {e}"}
     body = {"name": name or fp["hostname"], "fingerprint": fp, "ip": fc.local_ip(),

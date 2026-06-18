@@ -109,6 +109,13 @@ DEFAULT_POLICY = {
 def _conn():
     c = sqlite3.connect(fc.manager_db_path(), timeout=10)
     c.row_factory = sqlite3.Row
+    # WAL: izinkan banyak pembaca + 1 penulis (langkah kecil menuju HA; cluster
+    # penuh perlu DB jaringan/Postgres — roadmap). busy_timeout cegah "db locked".
+    try:
+        c.execute("PRAGMA journal_mode=WAL")
+        c.execute("PRAGMA busy_timeout=5000")
+    except Exception:
+        pass
     return c
 
 
@@ -330,7 +337,8 @@ def _enroll(body, raw, enroll_sig) -> tuple:
         "INSERT INTO agents(agent_id,agent_key,name,hostname,os,os_release,arch,ip,"
         "status,enrolled_at,last_seen,policy_version,labels,meta) "
         "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (agent_id, agent_key, body.get("name") or fp.get("hostname"), fp.get("hostname"),
+        (agent_id, cryptobox.encrypt(agent_key),   # agent_key dienkripsi at-rest (item #9)
+         body.get("name") or fp.get("hostname"), fp.get("hostname"),
          fp.get("os"), fp.get("os_release"), fp.get("arch"), body.get("ip", ""),
          "active", fc.now(), fc.now(), 0, json.dumps(labels), json.dumps(fp)))
     c.commit(); c.close()
@@ -346,7 +354,8 @@ def _auth_agent(agent_id, raw, sig):
     c.close()
     if not row:
         return None
-    return row["agent_key"] if fc.verify(row["agent_key"], raw, sig) else None
+    key = cryptobox.decrypt(row["agent_key"])      # dekripsi at-rest sebelum verifikasi
+    return key if fc.verify(key, raw, sig) else None
 
 
 def _heartbeat(agent_id, body) -> tuple:
@@ -640,9 +649,12 @@ class _Handler(BaseHTTPRequestHandler):
             if path in ("/heartbeat", "/agents/heartbeat"):
                 return self._send(*_heartbeat(aid, body))
             return self._send(*_ingest_events(aid, body))
-        # --- admin only ---
+        # --- admin only (tulis) ---
         if not self._admin_ok():
-            return self._send(401, {"error": "admin token diperlukan"})
+            role = self._role()
+            # 403: terautentikasi (viewer) tapi tak berwenang · 401: tak terautentikasi
+            return self._send(403 if role else 401,
+                              {"error": "butuh peran admin" if role else "admin token diperlukan"})
         if path == "/policy":
             return self._send(*_set_policy_api(body))
         if path == "/command":
@@ -1083,6 +1095,11 @@ def _make_server(host, port):
         try:
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             ctx.load_cert_chain(cert, key)
+            client_ca = os.environ.get("NEXUS_TLS_CLIENT_CA", "")
+            if client_ca and os.path.isfile(client_ca):   # mTLS: wajib cert klien
+                ctx.verify_mode = ssl.CERT_REQUIRED
+                ctx.load_verify_locations(client_ca)
+                log("[MANAGER] mTLS aktif — agent wajib sertifikat klien tepercaya.")
             srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
             _SCHEME = "https"
             log("[MANAGER] TLS aktif — transport terenkripsi (HTTPS).")

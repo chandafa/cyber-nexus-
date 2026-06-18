@@ -361,6 +361,28 @@ def main():
     # #5 replay window configurable + reset offset
     fc.set_clock_offset(0)
     check("#5 replay window dapat dikonfigurasi", mgr._replay_window() >= 60)
+    # nit: 403 untuk viewer (terautentikasi) menulis, 401 untuk token invalid
+    vtok = mgr.add_user("viewer")["token"]
+    try:
+        fc.post_admin(fc.manager_url("127.0.0.1", PORT, "/command"),
+                      {"agent_id": agent_id, "command": "ping"}, vtok)
+        check("viewer write -> 403", False)
+    except fc.HttpError as ex:
+        check("viewer write -> HTTP 403 (terautentikasi, tak berwenang)", ex.status == 403)
+    try:
+        fc.post_admin(fc.manager_url("127.0.0.1", PORT, "/command"),
+                      {"agent_id": agent_id, "command": "ping"}, "token-tak-valid")
+        check("token invalid -> 401", False)
+    except fc.HttpError as ex:
+        check("token invalid -> HTTP 401", ex.status == 401)
+    # HA: WAL mode
+    check("WAL mode aktif (langkah HA)",
+          mgr._conn().execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal")
+    # CVE: version range (introduced..fixed)
+    check("CVE range: log4j 1.2.17 di bawah introduced -> TIDAK cocok",
+          not any(x["cve"] == "CVE-2021-44228" for x in VD2.match([{"name": "log4j", "version": "1.2.17"}])))
+    check("CVE range: log4j 2.14.0 dalam rentang -> cocok",
+          any(x["cve"] == "CVE-2021-44228" for x in VD2.match([{"name": "log4j", "version": "2.14.0"}])))
 
     print("== 26. Lisensi valid (enterprise) terverifikasi ==")
     ls = mgr.license_status()
