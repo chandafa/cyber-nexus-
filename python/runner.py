@@ -383,6 +383,20 @@ def dispatch(command: str, kwargs: dict) -> dict:
         from modules import fleet_manager
         return {'module': 'fleet_manager', 'posture': fleet_manager.posture(kwargs.get('agent_id', ''))}
 
+    if command == 'fleet_license':
+        from modules import fleet_manager
+        if str(kwargs.get('reload', '')).lower() in ('1', 'true', 'yes'):
+            fleet_manager.reload_license()
+        return fleet_manager.license_status()
+
+    if command == 'fleet_vulndb_get':
+        from modules import fleet_manager
+        return {'module': 'fleet_manager', 'vuln_db': fleet_manager.get_vulndb()}
+
+    if command == 'fleet_vulndb_set':
+        from modules import fleet_manager
+        return fleet_manager.set_vulndb(kwargs.get('vuln_db', '[]'))
+
     if command == 'fleet_sigma_import':
         from modules import fleet_manager
         return fleet_manager.import_sigma(kwargs.get('sigma', '[]'))

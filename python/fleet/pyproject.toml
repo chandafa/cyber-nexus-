@@ -12,16 +12,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nexus-fleet"
-version = "1.0.0"
+version = "1.0.5"
 description = "Nexus Fleet — agent/manager/cli/dashboard keamanan endpoint (ala-Wazuh, ringan, stdlib-only)"
 readme = "README.md"
 requires-python = ">=3.8"
-license = { text = "MIT" }
-authors = [{ name = "Nexus Security" }]
+license = { text = "Proprietary" }
+authors = [{ name = "chandafa (Nexus Security)" }]
 keywords = ["security", "soc", "edr", "agent", "manager", "monitoring", "wazuh", "fleet"]
 classifiers = [
   "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: MIT License",
+  "License :: Other/Proprietary License",
   "Operating System :: OS Independent",
   "Topic :: Security",
   "Environment :: Console",
@@ -29,17 +29,20 @@ classifiers = [
 dependencies = []   # stdlib-only by design
 
 [project.urls]
-Homepage = "https://github.com/your-org/nexus-fleet"
-Issues = "https://github.com/your-org/nexus-fleet/issues"
+Homepage = "https://github.com/chandafa/cyber-nexus-"
+Issues = "https://github.com/chandafa/cyber-nexus-/issues"
 
 [project.scripts]
 nexus-manager = "nexus_manager.__main__:main"
 nexus-agent = "nexus_agent.__main__:main"
 nexus-cli = "nexus_cli.__main__:main"
 nexus-dashboard = "nexus_dashboard.server:main"
+nexus-license = "nexus_license.__main__:main"
 
 [tool.setuptools]
-packages = ["nexus_common", "nexus_manager", "nexus_agent", "nexus_cli", "nexus_dashboard"]
+packages = ["nexus_common", "nexus_manager", "nexus_agent", "nexus_cli",
+            "nexus_dashboard", "nexus_license"]
 
 [tool.setuptools.package-data]
 nexus_dashboard = ["*.html", "*.css", "*.js"]
+nexus_common = ["vendor_public.key"]

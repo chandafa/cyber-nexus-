@@ -23,11 +23,36 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from nexus_common import protocol as fc
 from nexus_common import schema
+from nexus_common import license as licensing
 from nexus_common.log import log
 from nexus_manager import rules as ruleengine
 
 _SERVER = None
 _THREAD = None
+_ENT = None
+
+
+def ent() -> dict:
+    """Hak pakai (entitlements) hasil verifikasi lisensi — di-cache per proses."""
+    global _ENT
+    if _ENT is None:
+        _ENT = licensing.entitlements()
+    return _ENT
+
+
+def reload_license() -> dict:
+    global _ENT
+    _ENT = licensing.entitlements()
+    return _ENT
+
+
+def license_status() -> dict:
+    e = ent()
+    return {"module": "fleet_manager", "valid": e["valid"], "tier": e["tier"],
+            "licensee": e["licensee"], "max_agents": e["max_agents"],
+            "features": sorted(e["features"]), "expires": e["expires"],
+            "expires_iso": fc.iso(e["expires"]) if e["expires"] else "—",
+            "reason": e["reason"]}
 
 EVENT_CAP = 20000        # retensi: simpan maksimal N event terbaru
 ALERT_CAP = 10000
@@ -40,12 +65,16 @@ DEFAULT_POLICY = {
     "collect_interval": fc.COLLECT_INTERVAL,
     "collectors": ["system", "listening_ports", "logged_users", "disk",
                    "firewall", "failed_logins", "fim", "sca",
-                   "software_inventory", "webaudit"],
+                   "software_inventory", "webaudit", "logmonitor",
+                   "processes", "network"],
     "risky_ports": [21, 23, 25, 135, 139, 445, 1433, 3306, 3389, 5900, 6379, 27017],
     # File Integrity Monitoring — path yang dipantau (hash baseline).
     "fim_paths": [],
     # Web/app audit — root project Laravel/Node yang dicek (.env, APP_DEBUG, dll).
     "webaudit_paths": [],
+    # Log Monitoring — berkas log yang dipantau. Item: path atau {path,type}.
+    # type: laravel|nginx|auth|generic (auto-deteksi bila kosong).
+    "log_paths": [],
     # Active Response: false = DRY-RUN (hanya log), true = eksekusi blokir nyata.
     "active_response": False,
     "min_report_severity": "info",
@@ -150,6 +179,9 @@ def _ensure_config():
         _set_cfg("policy_version", "1")
     if _get_cfg("rules") is None:
         _set_cfg("rules", json.dumps(ruleengine.DEFAULT_RULES))
+    if _get_cfg("vuln_db") is None:
+        from nexus_manager import vulndb
+        _set_cfg("vuln_db", json.dumps(vulndb.DEFAULT_VULN_DB))
     if _get_cfg("accept_demo") is None:
         _set_cfg("accept_demo", "0")        # real findings only (item #4)
     if _get_cfg("tenant") is None:
@@ -196,6 +228,18 @@ def _policy_version() -> int:
 def _enroll(body, raw, enroll_sig) -> tuple:
     if not fc.verify(_get_cfg("enroll_key"), raw, enroll_sig):
         return 401, {"error": "enrollment key tidak valid"}
+    # Gerbang lisensi: batas jumlah agent sesuai tier (FREE = beberapa, PRO = seat,
+    # ENTERPRISE = unlimited).
+    e = ent()
+    if e["max_agents"] is not None:
+        c0 = _conn()
+        n = c0.execute("SELECT COUNT(*) n FROM agents").fetchone()["n"]
+        c0.close()
+        if n >= e["max_agents"]:
+            log(f"[MANAGER] Enrollment ditolak: batas tier {e['tier']} ({e['max_agents']} agent) tercapai.")
+            return 403, {"error": f"Batas agent tier '{e['tier']}' tercapai "
+                                  f"({e['max_agents']}). Upgrade lisensi untuk menambah agent.",
+                         "tier": e["tier"], "max_agents": e["max_agents"]}
     fp = body.get("fingerprint", {})
     labels = body.get("labels", []) if isinstance(body.get("labels"), list) else []
     agent_id = fc.new_id("agt")
@@ -254,6 +298,10 @@ def _ingest_events(agent_id, body) -> tuple:
     accept_demo = (_get_cfg("accept_demo") or "0") == "1"
     tenant = _get_cfg("tenant") or "default"
     ruleset = get_rules()
+    # Gerbang lisensi: tanpa fitur 'advanced_rules' (FREE), hanya rule tier 'free'
+    # yang aktif (rule premium spt FIM .env, web-audit, dll. butuh lisensi).
+    if not licensing.has(ent(), "advanced_rules"):
+        ruleset = [r for r in ruleset if r.get("tier", "pro") == "free"]
     host = _host_for(agent_id)
     c = _conn()
     stored = skipped = n_alerts = 0
@@ -264,21 +312,15 @@ def _ingest_events(agent_id, body) -> tuple:
             skipped += 1
             continue
         ev = schema.enrich_event(ev, agent_id=agent_id, tenant_id=tenant, host=host)
-        c.execute(
-            "INSERT INTO events(event_id,agent_id,tenant_id,ts,source,type,category,"
-            "event_type,severity,origin,title,detail,host,target,evidence,data) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (ev["event_id"], agent_id, tenant, ev["ts"], ev["source"], ev["type"],
-             ev["category"], ev["event_type"], ev["severity"], ev["origin"],
-             ev["title"], ev["detail"], json.dumps(host),
-             json.dumps(ev["target"]), json.dumps(ev["evidence"]), json.dumps(ev["data"])))
+        _insert_event(c, ev, agent_id, tenant, host)
         stored += 1
         # Item #3: rule engine -> alert (dgn dedup utk kurangi alert fatigue)
-        for al in ruleengine.evaluate(ev, ruleset, agent_id, tenant):
-            if _alert_duplicate(c, al):
-                continue
-            _insert_alert(c, al)
-            n_alerts += 1
+        n_alerts += _run_rules(c, ev, ruleset, agent_id, tenant)
+        # Vulnerability Detection: korelasi inventori software ↔ CVE (sisi manager)
+        if ev["type"] == "software_inventory" and licensing.has(ent(), "advanced_rules"):
+            ds, da = _correlate_vulns(c, ev, ruleset, agent_id, tenant, host)
+            stored += ds
+            n_alerts += da
     c.execute("UPDATE agents SET last_seen=? WHERE agent_id=?", (fc.now(), agent_id))
     c.commit(); c.close()
     _prune()
@@ -300,6 +342,72 @@ def _alert_duplicate(c, al) -> bool:
         "AND ts>=? AND target=? LIMIT 1",
         (rule_id, al["agent_id"], fc.now() - DEDUP_WINDOW, target_json)).fetchone()
     return row is not None
+
+
+def _insert_event(c, ev, agent_id, tenant, host):
+    c.execute(
+        "INSERT INTO events(event_id,agent_id,tenant_id,ts,source,type,category,"
+        "event_type,severity,origin,title,detail,host,target,evidence,data) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (ev["event_id"], agent_id, tenant, ev["ts"], ev["source"], ev["type"],
+         ev["category"], ev["event_type"], ev["severity"], ev["origin"],
+         ev["title"], ev["detail"], json.dumps(host),
+         json.dumps(ev["target"]), json.dumps(ev["evidence"]), json.dumps(ev["data"])))
+
+
+def _run_rules(c, ev, ruleset, agent_id, tenant) -> int:
+    n = 0
+    for al in ruleengine.evaluate(ev, ruleset, agent_id, tenant):
+        if _alert_duplicate(c, al):
+            continue
+        _insert_alert(c, al)
+        n += 1
+    return n
+
+
+def _correlate_vulns(c, inv_ev, ruleset, agent_id, tenant, host):
+    """Cocokkan paket di event software_inventory dgn vuln DB -> event+alert CVE."""
+    from nexus_manager import vulndb
+    pkgs = (inv_ev.get("data") or {}).get("packages", [])
+    findings = vulndb.match(pkgs, get_vulndb())
+    n_ev = n_al = 0
+    for f in findings:
+        vev = schema.normalize_event({
+            "type": "vulnerability", "source": "vulndetect", "severity": f["severity"],
+            "event_type": "cve_match",
+            "title": f"{f['cve']}: {f['title']} — {f['package']} {f['installed']}",
+            "detail": f"Terpasang {f['installed']} < perbaikan {f['fixed']} (CVSS {f.get('cvss')}).",
+            "target": {"package": f["package"]},
+            "evidence": {"cve": f["cve"], "installed": f["installed"], "fixed": f["fixed"],
+                         "cvss": f.get("cvss")},
+            "origin": "real"})
+        vev = schema.enrich_event(vev, agent_id=agent_id, tenant_id=tenant, host=host)
+        _insert_event(c, vev, agent_id, tenant, host)
+        n_ev += 1
+        n_al += _run_rules(c, vev, ruleset, agent_id, tenant)
+    if findings:
+        log(f"[MANAGER] Vuln detection: {len(findings)} CVE cocok dari inventori {agent_id}")
+    return n_ev, n_al
+
+
+def get_vulndb() -> list:
+    from nexus_manager import vulndb
+    try:
+        return json.loads(_get_cfg("vuln_db") or "[]") or vulndb.DEFAULT_VULN_DB
+    except Exception:
+        return vulndb.DEFAULT_VULN_DB
+
+
+def set_vulndb(db_json, actor="admin") -> dict:
+    init_db()
+    try:
+        db = json.loads(db_json) if isinstance(db_json, str) else db_json
+        assert isinstance(db, list)
+    except Exception as e:
+        return {"ok": False, "error": f"vuln_db harus JSON array: {e}"}
+    _set_cfg("vuln_db", json.dumps(db))
+    _audit(actor, "vulndb:set", f"{len(db)} entri")
+    return {"ok": True, "count": len(db)}
 
 
 def _insert_alert(c, al):
@@ -432,6 +540,9 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/rules/sigma":
             r = import_sigma(body.get("sigma", body))
             return self._send(200 if r.get("ok") else 400, r)
+        if path == "/vulndb":
+            r = set_vulndb(body.get("vuln_db", body))
+            return self._send(200 if r.get("ok") else 400, r)
         return self._send(404, {"error": "endpoint tidak dikenal"})
 
     def do_GET(self):
@@ -448,6 +559,8 @@ class _Handler(BaseHTTPRequestHandler):
                                     "version": fc.API_VERSION, "time": fc.now()})
         if path in ("/policy", "/policies"):
             return self._send(200, {"policy": _policy(), "policy_version": _policy_version()})
+        if path == "/license":
+            return self._send(200, license_status())
         if not self._admin_ok():
             return self._send(401, {"error": "admin token diperlukan"})
 
@@ -468,6 +581,8 @@ class _Handler(BaseHTTPRequestHandler):
                 int(_q("min_level", "0")))["alerts"]})
         if path == "/rules":
             return self._send(200, {"rules": get_rules()})
+        if path == "/vulndb":
+            return self._send(200, {"vuln_db": get_vulndb()})
         if path == "/audit":
             return self._send(200, list_audit(int(_q("limit", "200"))))
         if path == "/report":
@@ -580,6 +695,9 @@ def import_sigma(sigma_json, actor="admin") -> dict:
     """Konversi rule Sigma (JSON) -> rule native & tambahkan ke ruleset."""
     from nexus_manager import sigma as sigmod
     init_db()
+    if not licensing.has(ent(), "sigma"):
+        return {"ok": False, "error": "Import Sigma butuh lisensi Pro/Enterprise.",
+                "feature": "sigma"}
     try:
         data = json.loads(sigma_json) if isinstance(sigma_json, str) else sigma_json
     except Exception as e:
@@ -598,6 +716,9 @@ def import_sigma(sigma_json, actor="admin") -> dict:
 
 def response_action(agent_id, action, ip="", target="", actor="admin") -> dict:
     """Active Response: antri perintah respon ke agent (eksekusi dgn dry-run default)."""
+    if not licensing.has(ent(), "active_response"):
+        return {"ok": False, "error": "Active Response butuh lisensi Pro/Enterprise.",
+                "feature": "active_response"}
     r = queue_command(agent_id, "respond", {"action": action, "ip": ip, "target": target})
     if r.get("ok"):
         _audit(actor, "response:" + action, f"{agent_id} {ip or target}")
@@ -748,9 +869,12 @@ def _probe_running(host, port):
 def manager_status(host=fc.DEFAULT_MANAGER_HOST, port=fc.DEFAULT_MANAGER_PORT) -> dict:
     init_db()
     s = stats()
+    e = ent()
     return {"module": "fleet_manager", "running": _probe_running(host, int(port)),
             "enroll_key": get_enroll_key(), "admin_token": get_admin_token(),
             "host": host, "port": int(port),
+            "license": {"tier": e["tier"], "valid": e["valid"], "licensee": e["licensee"],
+                        "max_agents": e["max_agents"], "features": sorted(e["features"])},
             **{k: v for k, v in s.items() if k != "module"}}
 
 
@@ -765,6 +889,14 @@ def _banner(host, port):
     log(f"[MANAGER] Dashboard      : http://{host}:{port}/")
     log(f"[MANAGER] Enrollment key : {get_enroll_key()}")
     log(f"[MANAGER] Admin token    : {get_admin_token()}")
+    e = ent()
+    if e["valid"]:
+        seats = "unlimited" if e["max_agents"] is None else e["max_agents"]
+        log(f"[MANAGER] Lisensi        : {e['tier'].upper()} — {e['licensee']} "
+            f"({seats} agent, exp {fc.iso(e['expires']) if e['expires'] else 'never'})")
+    else:
+        log(f"[MANAGER] Lisensi        : FREE (terbatas {licensing.FREE_MAX_AGENTS} agent, "
+            f"fitur dasar). Pasang NEXUS_LICENSE untuk membuka Pro.")
     log("[MANAGER] Bagikan host:port + enrollment key ke endpoint untuk mendaftarkan agent.")
 
 

@@ -309,11 +309,140 @@ def c_webaudit(policy):
     return out
 
 
+# --------------------------------------------------------------------------- Log decoders (ala-Wazuh)
+import re as _re
+
+_SCANNER_UA = ("sqlmap", "nikto", "nmap", "dirbuster", "gobuster", "acunetix",
+               "nessus", "masscan", "wpscan", "hydra")
+_WEB_ATTACK = _re.compile(
+    r"(union\s+select|select\s+.*\s+from|<script|onerror=|\.\./|/etc/passwd|"
+    r"'\s*or\s*'1'\s*=\s*'1|;--|\bexec\b|base64_decode|/bin/sh)", _re.I)
+
+
+def detect_logtype(path):
+    p = os.path.basename(path).lower()
+    if "laravel" in p or p.endswith(".log") and "storage" in path.lower():
+        return "laravel"
+    if "access" in p or "nginx" in p or "apache" in p:
+        return "nginx"
+    if "auth" in p or "secure" in p:
+        return "auth"
+    if "laravel" in path.lower():
+        return "laravel"
+    return "generic"
+
+
+def _ev(sev, etype, title, data=None):
+    return {"type": "log", "source": "logcollector", "severity": sev,
+            "event_type": etype, "title": title[:200], "data": data or {}}
+
+
+def decode_laravel(line):
+    if _re.search(r"\.(EMERGENCY|CRITICAL)\b", line):
+        return _ev("critical", "app_exception", "Laravel exception kritis: " + line.strip())
+    if _re.search(r"\.(ERROR|ALERT)\b|production\.ERROR", line):
+        return _ev("high", "app_exception", "Laravel ERROR di log: " + line.strip())
+    return None
+
+
+def decode_nginx(line):
+    m = _re.search(r'"([A-Z]+)\s+(.*?)\s+HTTP/[\d.]+"\s+(\d{3})', line)
+    if not m:
+        m = _re.search(r'"([A-Z]+)\s+(\S+)"\s+(\d{3})', line)   # tanpa versi HTTP
+        if not m:
+            return None
+    method, request, status = m.group(1), m.group(2), int(m.group(3))
+    ua = (_re.findall(r'"([^"]*)"', line) or [""])[-1].lower()
+    if any(s in (request.lower() + " " + ua) for s in _SCANNER_UA):
+        return _ev("high", "scanner_detected",
+                   f"Scanner terdeteksi di akses web: {method} {request[:80]}", {"status": status})
+    if _WEB_ATTACK.search(request):
+        return _ev("critical", "web_attack",
+                   f"Pola serangan web di request: {method} {request[:80]}", {"status": status})
+    if status == 419:
+        return _ev("low", "csrf", f"CSRF token mismatch (419): {request[:80]}", {"status": 419})
+    if status >= 500:
+        return _ev("medium", "server_error", f"Server error {status}: {method} {request[:80]}",
+                   {"status": status})
+    return None
+
+
+def decode_auth(line):
+    if "Failed password" in line:
+        return _ev("medium", "log_failed_login", "Login gagal (SSH/PAM): " + line.strip())
+    if "authentication failure" in line.lower():
+        return _ev("medium", "log_failed_login", "Authentication failure: " + line.strip())
+    return None
+
+
+def decode_generic(line):
+    if _re.search(r"\b(CRITICAL|FATAL|EMERG)\b", line):
+        return _ev("high", "log_error", "Log kritis: " + line.strip())
+    if _re.search(r"\bERROR\b", line):
+        return _ev("medium", "log_error", "Log error: " + line.strip())
+    return None
+
+
+_DECODERS = {"laravel": decode_laravel, "nginx": decode_nginx,
+             "auth": decode_auth, "generic": decode_generic}
+
+
+def decode_line(line, logtype):
+    fn = _DECODERS.get(logtype, decode_generic)
+    return fn(line)
+
+
+_SUSPICIOUS_PROC = ("mimikatz", "ncat", "netcat", "xmrig", "cryptominer", "masscan",
+                    "lazagne", "rubeus", "cobaltstrike", "metasploit", "meterpreter")
+
+
+def c_processes(policy):
+    """Inventori proses berjalan (Wazuh syscollector) + flag proses mencurigakan."""
+    sysname = platform.system()
+    procs = []
+    if sysname == "Windows":
+        out = _run(["tasklist", "/fo", "csv", "/nh"])
+        for line in out.splitlines():
+            cells = line.split('","')
+            if cells:
+                procs.append(cells[0].strip('"').strip())
+    else:
+        out = _run(["ps", "-eo", "comm"])
+        procs = [l.strip() for l in out.splitlines()[1:] if l.strip()]
+    procs = [p for p in procs if p]
+    events = [{"type": "processes", "severity": "info", "event_type": "process_list",
+               "title": f"{len(procs)} proses berjalan",
+               "detail": ", ".join(sorted(set(procs))[:20]),
+               "data": {"count": len(procs)}}]
+    for p in sorted({x for x in procs if any(s in x.lower() for s in _SUSPICIOUS_PROC)}):
+        events.append({"type": "processes", "severity": "high",
+                       "event_type": "suspicious_process",
+                       "title": f"Proses mencurigakan terdeteksi: {p}",
+                       "target": {"process": p}, "data": {}})
+    return events
+
+
+def c_network(policy):
+    """Inventori interface/alamat IP (Wazuh syscollector)."""
+    if platform.system() == "Windows":
+        out = _run(["ipconfig"])
+        ips = set(_re.findall(r"IPv4.*?:\s*([\d.]+)", out))
+    else:
+        out = _run(["ip", "-o", "addr"]) or _run(["ifconfig"])
+        ips = set(_re.findall(r"inet\s+(?:addr:)?([\d.]+)", out))
+    ips.discard("127.0.0.1")
+    return [{"type": "network", "severity": "info", "event_type": "network_inventory",
+             "title": f"{len(ips)} alamat IP pada host",
+             "detail": ", ".join(sorted(ips)) or "—", "data": {"ips": sorted(ips)}}]
+
+
 REGISTRY = {
     "system": c_system, "listening_ports": c_listening_ports,
     "logged_users": c_logged_users, "disk": c_disk,
     "firewall": c_firewall, "failed_logins": c_failed_logins,
     "software_inventory": c_software_inventory, "sca": c_sca, "webaudit": c_webaudit,
+    "processes": c_processes, "network": c_network,
 }
 
-NAMES = list(REGISTRY.keys()) + ["fim"]   # fim diproses di agent (butuh baseline)
+# fim & logmonitor diproses di agent (butuh state: baseline/offset)
+NAMES = list(REGISTRY.keys()) + ["fim", "logmonitor"]

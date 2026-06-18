@@ -18,6 +18,15 @@ os.environ["NEXUS_AGENT_DB"] = os.path.join(_tmp, "agt.db")
 import json                                    # noqa: E402
 from nexus_common import protocol as fc        # noqa: E402
 from nexus_common import schema                # noqa: E402
+from nexus_common import license as lic        # noqa: E402
+
+# Setup lisensi ENTERPRISE untuk seksi 1-25 (uji fitur premium). Kunci vendor
+# disuntik via env sebelum manager dimuat agar entitlements memverifikasinya.
+_SEED, _PK = lic.generate_keypair()
+os.environ["NEXUS_VENDOR_PUBKEY"] = _PK
+os.environ["NEXUS_LICENSE"] = lic.issue(_SEED, "Test Co", tier="enterprise",
+                                        days=365, max_agents=999)
+
 from nexus_manager import server as mgr        # noqa: E402
 from nexus_manager import rules as ruleengine  # noqa: E402
 from nexus_agent import agent as agt           # noqa: E402
@@ -221,6 +230,84 @@ def main():
     print("== 25. response_action queues agent command ==")
     rr = mgr.response_action(agent_id, "block_ip", ip="203.0.113.9")
     check("respond command queued", rr.get("ok") is True)
+
+    print("== 25b. Log Monitoring: decoder app (laravel/nginx/auth) + rule ==")
+    from nexus_agent import collectors as C
+    check("nginx web-attack decoded", C.decode_line(
+        '1.2.3.4 - - [t] "GET /?id=1 union select pass from users HTTP/1.1" 200 -',
+        "nginx")["event_type"] == "web_attack")
+    check("nginx scanner decoded", C.decode_line(
+        '1.2.3.4 - - [t] "GET / HTTP/1.1" 200 - "-" "sqlmap/1.5"', "nginx")
+        ["event_type"] == "scanner_detected")
+    check("laravel exception decoded", C.decode_line(
+        "[2026-01-01] production.ERROR: Boom", "laravel")["event_type"] == "app_exception")
+    check("auth failed-login decoded", C.decode_line(
+        "Failed password for root from 1.2.3.4", "auth")["event_type"] == "log_failed_login")
+    ingest([{"type": "log", "source": "logcollector", "severity": "critical",
+             "event_type": "web_attack", "title": "SQLi attempt", "origin": "real"}])
+    check("NEXUS-LOG-001 fired (web attack)",
+          any(a["rule_id"] == "NEXUS-LOG-001" for a in mgr.list_alerts(500)["alerts"]))
+
+    print("== 25c. Vulnerability Detection (inventory software -> CVE) ==")
+    ingest([{"type": "software_inventory", "severity": "info", "title": "inv",
+             "data": {"packages": [{"name": "OpenSSL", "version": "1.1.1n"},
+                                   {"name": "Log4j Core", "version": "2.14.0"},
+                                   {"name": "SafeApp", "version": "9.9.9"}]}, "origin": "real"}])
+    vulns = [a for a in mgr.list_alerts(500)["alerts"] if a["rule_id"] == "NEXUS-VULN-001"]
+    check("NEXUS-VULN-001 fired dari inventory", len(vulns) >= 1)
+    check("alert membawa CVE di evidence",
+          any(str(a["evidence"].get("cve", "")).startswith("CVE-") for a in vulns))
+    check("Log4Shell (CVE-2021-44228) terdeteksi",
+          any(a["evidence"].get("cve") == "CVE-2021-44228" for a in vulns))
+
+    print("== 25d. Syscollector (proses/jaringan) + suspicious process ==")
+    from nexus_agent import collectors as C2
+    pe = C2.c_processes({})
+    check("process inventory (process_list)", any(e["event_type"] == "process_list" for e in pe))
+    ne = C2.c_network({})
+    check("network inventory", ne[0]["event_type"] == "network_inventory")
+    ingest([{"type": "processes", "severity": "high", "event_type": "suspicious_process",
+             "title": "mimikatz", "target": {"process": "mimikatz.exe"}, "origin": "real"}])
+    check("NEXUS-PROC-001 fired (suspicious process)",
+          any(a["rule_id"] == "NEXUS-PROC-001" for a in mgr.list_alerts(500)["alerts"]))
+
+    print("== 26. Lisensi valid (enterprise) terverifikasi ==")
+    ls = mgr.license_status()
+    check("license valid", ls["valid"] and ls["tier"] == "enterprise")
+    check("license has features", "sigma" in ls["features"] and "active_response" in ls["features"])
+
+    print("== 27. Gerbang FREE: cabut lisensi -> fitur premium terkunci ==")
+    os.environ["NEXUS_LICENSE"] = ""
+    mgr.reload_license()
+    lf = mgr.license_status()
+    check("free tier active", lf["tier"] == "free" and not lf["valid"])
+    check("free max_agents=2", lf["max_agents"] == 2)
+    check("sigma blocked on free", mgr.import_sigma(json.dumps(sigma)).get("ok") is False)
+    check("active_response blocked on free",
+          mgr.response_action(agent_id, "block_ip", ip="1.1.1.1").get("ok") is False)
+    # rule premium (FIM .env) tidak menghasilkan alert di free
+    fim_before = len([a for a in mgr.list_alerts(500)["alerts"] if a["rule_id"] == "NEXUS-FIM-001"])
+    ingest([{"type": "fim_change", "severity": "high", "event_type": "file_modified",
+             "title": "x", "target": {"path": "/x/free.env"},
+             "evidence": {"old_hash": "a", "new_hash": "b"}, "origin": "real"}])
+    fim_after = len([a for a in mgr.list_alerts(500)["alerts"] if a["rule_id"] == "NEXUS-FIM-001"])
+    check("premium FIM rule filtered on free", fim_after == fim_before)
+
+    print("== 28. Gerbang FREE: batas jumlah agent (seat) ==")
+    c = mgr._conn()
+    cur = c.execute("SELECT COUNT(*) n FROM agents").fetchone()["n"]
+    while cur < 2:
+        c.execute("INSERT INTO agents(agent_id,agent_key,name,status,enrolled_at,last_seen) "
+                  "VALUES(?,?,?,?,?,?)", (fc.new_id("agt"), "k", "dummy", "active", fc.now(), 0))
+        cur += 1
+    c.commit(); c.close()
+    try:
+        fc.post_enroll(fc.manager_url("127.0.0.1", PORT, "/enroll"),
+                       {"name": "overflow", "fingerprint": fc.host_fingerprint(), "ip": ""},
+                       enroll_key)
+        check("free enroll limit enforced", False)
+    except fc.HttpError as ex:
+        check("free enroll limit enforced", ex.status == 403)
 
     mgr.stop()
     print()

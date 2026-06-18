@@ -1,0 +1,82 @@
+# nexus_manager/vulndb.py
+"""
+Vulnerability Detection (ala-Wazuh) — korelasi software inventory ↔ CVE.
+
+Agent mengirim inventori software (nama+versi); manager mencocokkannya dengan
+basis data kerentanan (offline, bisa diperbarui vendor). Versi terpasang yang
+LEBIH RENDAH dari versi perbaikan → temuan kerentanan → alert.
+
+DB default berisi CVE umum yang berdampak tinggi. Vendor/operator dapat
+memperbarui via POST /vulndb (admin) atau mengganti seluruh daftar.
+"""
+
+# Pencocokan: `product` dicocokkan sebagai substring (lowercase) terhadap nama
+# paket; `fixed` = versi pertama yang sudah aman.
+DEFAULT_VULN_DB = [
+    {"product": "openssl", "fixed": "1.1.1t", "cve": "CVE-2023-0286", "severity": "high",
+     "cvss": 7.4, "mitre": ["T1190"], "title": "OpenSSL X.400 type confusion (X.509)"},
+    {"product": "openssl", "fixed": "3.0.7", "cve": "CVE-2022-3602", "severity": "high",
+     "cvss": 7.5, "mitre": ["T1190"], "title": "OpenSSL X.509 buffer overflow (punycode)"},
+    {"product": "openssh", "fixed": "9.3", "cve": "CVE-2023-38408", "severity": "high",
+     "cvss": 9.8, "mitre": ["T1210"], "title": "OpenSSH ssh-agent RCE (PKCS#11)"},
+    {"product": "log4j", "fixed": "2.17.1", "cve": "CVE-2021-44228", "severity": "critical",
+     "cvss": 10.0, "mitre": ["T1190"], "title": "Log4Shell — Log4j JNDI RCE"},
+    {"product": "sudo", "fixed": "1.9.5", "cve": "CVE-2021-3156", "severity": "high",
+     "cvss": 7.8, "mitre": ["T1068"], "title": "Sudo Baron Samedit heap overflow (LPE)"},
+    {"product": "nginx", "fixed": "1.21.0", "cve": "CVE-2021-23017", "severity": "high",
+     "cvss": 7.7, "mitre": ["T1190"], "title": "nginx DNS resolver off-by-one"},
+    {"product": "httpd", "fixed": "2.4.51", "cve": "CVE-2021-42013", "severity": "critical",
+     "cvss": 9.8, "mitre": ["T1190"], "title": "Apache httpd path traversal/RCE"},
+    {"product": "apache", "fixed": "2.4.51", "cve": "CVE-2021-42013", "severity": "critical",
+     "cvss": 9.8, "mitre": ["T1190"], "title": "Apache httpd path traversal/RCE"},
+    {"product": "bash", "fixed": "4.3", "cve": "CVE-2014-6271", "severity": "critical",
+     "cvss": 9.8, "mitre": ["T1190"], "title": "Shellshock — Bash env RCE"},
+    {"product": "curl", "fixed": "7.84.0", "cve": "CVE-2022-32207", "severity": "high",
+     "cvss": 9.8, "mitre": ["T1190"], "title": "curl cookie file overwrite"},
+    {"product": "git", "fixed": "2.35.2", "cve": "CVE-2022-24765", "severity": "medium",
+     "cvss": 6.2, "mitre": ["T1059"], "title": "Git multi-user repo privilege issue"},
+    {"product": "python", "fixed": "3.9.2", "cve": "CVE-2021-3177", "severity": "high",
+     "cvss": 9.8, "mitre": ["T1190"], "title": "Python ctypes buffer overflow"},
+]
+
+
+def _parse_ver(v):
+    out = []
+    for part in str(v or "").replace("-", ".").replace("p", ".").split("."):
+        num = "".join(ch for ch in part if ch.isdigit())
+        out.append(int(num) if num else 0)
+    return out
+
+
+def _vless(a, b):
+    """True bila versi a < b (perbandingan numerik per komponen)."""
+    pa, pb = _parse_ver(a), _parse_ver(b)
+    n = max(len(pa), len(pb))
+    pa += [0] * (n - len(pa))
+    pb += [0] * (n - len(pb))
+    return pa < pb
+
+
+def match(packages, db=None):
+    """Cocokkan list paket [{name,version}] dgn DB. Kembalikan list temuan."""
+    db = db if db is not None else DEFAULT_VULN_DB
+    findings = []
+    seen = set()
+    for pkg in packages or []:
+        name = str(pkg.get("name", "")).lower()
+        ver = pkg.get("version", "")
+        if not name or not ver:
+            continue
+        for entry in db:
+            if entry["product"] in name and _vless(ver, entry["fixed"]):
+                key = (name, entry["cve"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                findings.append({
+                    "package": pkg.get("name"), "installed": ver,
+                    "fixed": entry["fixed"], "cve": entry["cve"],
+                    "severity": entry["severity"], "cvss": entry.get("cvss"),
+                    "mitre": entry.get("mitre", []), "title": entry["title"],
+                })
+    return findings
