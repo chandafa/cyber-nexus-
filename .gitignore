@@ -46,3 +46,9 @@ python/modules/waf_key.pem
 *.egg-info/
 build/
 python/fleet/dist/
+
+# RAHASIA lisensi — JANGAN PERNAH commit private key vendor / file lisensi pelanggan
+vendor_private.key
+*.license
+.nexus/
+# (vendor_public.key SENGAJA tidak diabaikan — itu publik & wajib ikut paket)
