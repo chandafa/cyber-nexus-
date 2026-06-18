@@ -3,6 +3,17 @@
 All notable changes to **Nexus Fleet** (`nexus-fleet`) are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.7] — 2026-06
+### Fixed / Improved
+- **License hot-reload** — apply a license to a running manager without restart
+  (`POST /api/v1/license/apply`, `nexus-cli apply-license`).
+- **TLS for admin tools** — `nexus-cli --tls/--cacert/--insecure` (HTTPS no longer breaks the CLI).
+- **Vulnerability Detection across OSes** — version is parsed from Windows DisplayNames; expanded CVE
+  set (Node, 7-Zip, PuTTY, Jenkins).
+- **One-command onboarding** — `nexus-agent enroll --watch <path>` auto-enables FIM/web-audit/log for
+  a project without editing central policy.
+- **At-rest hardening** — manager/agent database files are created with `0600` permissions.
+
 ## [1.0.6] — 2026-06
 ### Added
 - **TLS transport** for agent ↔ manager (`nexus-manager gencert`, `run --cert/--key`;

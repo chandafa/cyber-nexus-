@@ -42,6 +42,10 @@ def _init():
         c.execute("CREATE TABLE queue (id INTEGER PRIMARY KEY AUTOINCREMENT, "
                   "ts INTEGER, payload TEXT)")
     c.commit(); c.close()
+    try:                                  # mitigasi at-rest: batasi izin file state agent
+        os.chmod(fc.agent_state_path(), 0o600)
+    except Exception:
+        pass
 
 
 def _get(key, default=None):
@@ -84,8 +88,40 @@ def _queue_size():
 
 
 # --------------------------------------------------------------------------- collect
+def _effective_policy():
+    """Gabungkan policy manager dgn `watch_paths` lokal agent (onboarding 1-perintah):
+    arahkan FIM/web-audit/log ke project tanpa harus mengubah policy pusat."""
+    pol = dict(_policy())
+    try:
+        watch = json.loads(_get("watch_paths", "[]") or "[]")
+    except Exception:
+        watch = []
+    if not watch:
+        return pol
+    wp = list(pol.get("webaudit_paths", []))
+    fp = list(pol.get("fim_paths", []))
+    lp = list(pol.get("log_paths", []))
+    cols = list(pol.get("collectors", collectors.NAMES))
+    for w in watch:
+        if os.path.isdir(w):
+            wp.append(w)
+            envf = os.path.join(w, ".env")
+            if os.path.isfile(envf):
+                fp.append(envf)
+        elif w.endswith(".log") and os.path.isfile(w):
+            lp.append(w)
+        elif os.path.isfile(w):
+            fp.append(w)
+    pol["webaudit_paths"], pol["fim_paths"], pol["log_paths"] = wp, fp, lp
+    for c in ("webaudit", "fim", "logmonitor"):
+        if c not in cols:
+            cols.append(c)
+    pol["collectors"] = cols
+    return pol
+
+
 def collect_all():
-    pol = _policy()
+    pol = _effective_policy()
     enabled = pol.get("collectors", collectors.NAMES)
     min_sev = _SEV_RANK.get(pol.get("min_report_severity", "info"), 0)
     out = []
@@ -226,11 +262,14 @@ def _murl(path):
                           scheme=_get("manager_scheme", "http"))
 
 
-def enroll(manager_host, manager_port, enroll_key, name="", labels=None, tls=False):
+def enroll(manager_host, manager_port, enroll_key, name="", labels=None, tls=False, watch=None):
     _init()
     fp = fc.host_fingerprint()
     if isinstance(labels, str):
         labels = [x.strip() for x in labels.split(",") if x.strip()]
+    if isinstance(watch, str):
+        watch = [x.strip() for x in watch.split(",") if x.strip()]
+    _set("watch_paths", json.dumps(watch or []))
     scheme = "https" if tls else "http"
     # TLS TOFU: ambil & pin sertifikat manager saat kontak pertama.
     if tls:

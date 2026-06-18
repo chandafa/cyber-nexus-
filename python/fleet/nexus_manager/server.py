@@ -35,17 +35,36 @@ _ENT = None
 
 
 def ent() -> dict:
-    """Hak pakai (entitlements) hasil verifikasi lisensi — di-cache per proses."""
+    """Hak pakai (entitlements) — dari config license_token (hot-reload) atau env. Cache per proses."""
     global _ENT
     if _ENT is None:
-        _ENT = licensing.entitlements()
+        _ENT = licensing.entitlements(token=_get_cfg("license_token") or "")
     return _ENT
 
 
 def reload_license() -> dict:
     global _ENT
-    _ENT = licensing.entitlements()
+    _ENT = licensing.entitlements(token=_get_cfg("license_token") or "")
     return _ENT
+
+
+def apply_license(token, actor="admin") -> dict:
+    """Pasang lisensi pada manager yang SEDANG berjalan — tanpa restart (hot-reload)."""
+    init_db()
+    token = (token or "").strip()
+    if token and os.path.isfile(token):
+        try:
+            token = open(token, encoding="utf-8").read().strip()
+        except Exception as e:
+            return {"ok": False, "error": f"gagal baca file lisensi: {e}"}
+    res = licensing.entitlements(token=token)
+    if token and not res["valid"]:
+        return {"ok": False, "error": f"lisensi tidak valid: {res['reason']}"}
+    _set_cfg("license_token", token)
+    reload_license()
+    _audit(actor, "license:apply", res.get("tier"))
+    log(f"[MANAGER] Lisensi diterapkan (hot-reload) -> {res['tier'].upper()}.")
+    return {"ok": True, **license_status()}
 
 
 def license_status() -> dict:
@@ -132,6 +151,10 @@ def init_db():
     c.commit()
     _migrate(c)
     c.close()
+    try:                                  # mitigasi at-rest: batasi izin file DB
+        os.chmod(fc.manager_db_path(), 0o600)
+    except Exception:
+        pass
     _ensure_config()
 
 
@@ -577,6 +600,9 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/notify":
             r = set_notify(body.get("webhook", ""), body.get("min_level", 12))
             return self._send(200, r)
+        if path == "/license/apply":
+            r = apply_license(body.get("token", ""))
+            return self._send(200 if r.get("ok") else 400, r)
         if path == "/rules":
             r = set_rules(body.get("rules", []))
             return self._send(200 if r.get("ok") else 400, r)

@@ -304,6 +304,18 @@ def main():
     check("ingest tetap sukses walau webhook gagal", r_robust.get("ok") is True)
     mgr.set_notify("", 12)
 
+    print("== 25g. Fix: CVE version-from-name + agent watch effective-policy ==")
+    from nexus_manager import vulndb as VD
+    fnd = VD.match([{"name": "OpenSSL 1.1.1n", "version": ""}])   # versi kosong -> urai dari nama
+    check("CVE cocok dari DisplayName (versi diurai)",
+          any(str(x["cve"]).startswith("CVE-") for x in fnd))
+    import tempfile as _tf
+    agt._set("watch_paths", json.dumps([_tf.gettempdir()]))
+    ep = agt._effective_policy()
+    check("watch -> webaudit_paths terisi & collector aktif",
+          len(ep.get("webaudit_paths", [])) >= 1 and "webaudit" in ep.get("collectors", []))
+    agt._set("watch_paths", "[]")
+
     print("== 26. Lisensi valid (enterprise) terverifikasi ==")
     ls = mgr.license_status()
     check("license valid", ls["valid"] and ls["tier"] == "enterprise")
@@ -325,6 +337,13 @@ def main():
              "evidence": {"old_hash": "a", "new_hash": "b"}, "origin": "real"}])
     fim_after = len([a for a in mgr.list_alerts(500)["alerts"] if a["rule_id"] == "NEXUS-FIM-001"])
     check("premium FIM rule filtered on free", fim_after == fim_before)
+
+    print("== 27b. Fix: license HOT-RELOAD (free -> pro tanpa restart manager) ==")
+    pro_tok = lic.issue(_SEED, "HotReload", tier="pro", days=365, max_agents=5)
+    ra = mgr.apply_license(pro_tok)
+    check("apply_license hot-reload -> pro", ra.get("ok") and ra.get("tier") == "pro")
+    mgr.apply_license("")          # kembali ke free utk seksi 28
+    check("apply kosong -> free", mgr.license_status()["tier"] == "free")
 
     print("== 28. Gerbang FREE: batas jumlah agent (seat) ==")
     c = mgr._conn()

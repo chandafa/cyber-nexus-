@@ -37,7 +37,26 @@ DEFAULT_VULN_DB = [
      "cvss": 6.2, "mitre": ["T1059"], "title": "Git multi-user repo privilege issue"},
     {"product": "python", "fixed": "3.9.2", "cve": "CVE-2021-3177", "severity": "high",
      "cvss": 9.8, "mitre": ["T1190"], "title": "Python ctypes buffer overflow"},
+    {"product": "node", "fixed": "18.20.4", "cve": "CVE-2024-22020", "severity": "medium",
+     "cvss": 6.5, "mitre": ["T1190"], "title": "Node.js bypass network import restriction"},
+    {"product": "7-zip", "fixed": "21.07", "cve": "CVE-2022-29072", "severity": "high",
+     "cvss": 7.8, "mitre": ["T1068"], "title": "7-Zip privilege escalation (help)"},
+    {"product": "putty", "fixed": "0.81", "cve": "CVE-2024-31497", "severity": "high",
+     "cvss": 7.4, "mitre": ["T1552"], "title": "PuTTY NIST P-521 ECDSA key recovery"},
+    {"product": "jenkins", "fixed": "2.442", "cve": "CVE-2024-23897", "severity": "critical",
+     "cvss": 9.8, "mitre": ["T1083"], "title": "Jenkins CLI arbitrary file read (RCE)"},
 ]
+
+import re as _re
+_VER_RE = _re.compile(r"(\d+(?:\.\d+){1,3})")
+
+
+def _extract_version(name, version):
+    """Ambil versi dari field version; bila kosong/aneh, urai dari nama (DisplayName Windows)."""
+    if version and any(ch.isdigit() for ch in str(version)):
+        return str(version)
+    m = _VER_RE.search(str(name or ""))
+    return m.group(1) if m else ""
 
 
 def _parse_ver(v):
@@ -64,7 +83,7 @@ def match(packages, db=None):
     seen = set()
     for pkg in packages or []:
         name = str(pkg.get("name", "")).lower()
-        ver = pkg.get("version", "")
+        ver = _extract_version(pkg.get("name", ""), pkg.get("version", ""))
         if not name or not ver:
             continue
         for entry in db:

@@ -32,6 +32,9 @@ def main(argv=None):
     p.add_argument("--host", default=fc.DEFAULT_MANAGER_HOST)
     p.add_argument("--port", default=str(fc.DEFAULT_MANAGER_PORT))
     p.add_argument("--token", default=os.environ.get("NEXUS_ADMIN_TOKEN", ""))
+    p.add_argument("--tls", action="store_true", help="hubungi manager via HTTPS")
+    p.add_argument("--cacert", default="", help="CA/cert untuk verifikasi TLS")
+    p.add_argument("--insecure", action="store_true", help="HTTPS tanpa verifikasi cert (uji saja)")
     sub = p.add_subparsers(dest="action")
 
     sub.add_parser("menu")
@@ -49,7 +52,14 @@ def main(argv=None):
     cm = sub.add_parser("command")
     cm.add_argument("--agent", required=True); cm.add_argument("--cmd", required=True)
     cm.add_argument("--args", default="")
+    apl = sub.add_parser("apply-license", help="pasang lisensi ke manager (hot-reload)")
+    apl.add_argument("--file"); apl.add_argument("--token", dest="lic")
     args = p.parse_args(argv)
+
+    # Konfigurasi TLS untuk transport admin (Fix: TLS untuk CLI/dashboard).
+    if args.tls or args.insecure:
+        admin.set_scheme("https")
+        fc.set_client_tls(cafile=args.cacert, insecure=args.insecure or not args.cacert)
 
     # default / 'menu' -> interaktif
     if args.action in (None, "menu"):
@@ -84,6 +94,12 @@ def main(argv=None):
         elif args.action == "command":
             out = admin.command(args.host, args.port, args.token, args.agent, args.cmd,
                                 json.loads(args.args) if args.args else {})
+        elif args.action == "apply-license":
+            lic = args.lic or ""
+            if args.file:
+                with open(args.file, encoding="utf-8") as f:
+                    lic = f.read().strip()
+            out = admin.apply_license(args.host, args.port, args.token, lic)
         else:
             raise SystemExit(f"aksi tidak dikenal: {args.action}")
     except fc.HttpError as e:
