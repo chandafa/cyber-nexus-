@@ -28,8 +28,9 @@ export const FleetManager: React.FC = () => {
   const [status, setStatus] = useState<any>(null);
   const [agents, setAgents] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
+  const [alerts, setAlerts] = useState<any[]>([]);
   const [policy, setPolicy] = useState<string>("");
-  const [tab, setTab] = useState<"agents" | "events" | "policy">("agents");
+  const [tab, setTab] = useState<"agents" | "alerts" | "events" | "policy">("alerts");
 
   const start = () => {
     consoleRef.current?.start({
@@ -48,6 +49,8 @@ export const FleetManager: React.FC = () => {
       setAgents(a.agents || []);
       const e = await runToolJson("fleet_events", ["--limit", "200"]);
       setEvents(e.events || []);
+      const al = await runToolJson("fleet_alerts", ["--limit", "200"]);
+      setAlerts(al.alerts || []);
       if (!policy) {
         const p = await runToolJson("fleet_policy_get");
         setPolicy(JSON.stringify(p.policy, null, 2));
@@ -72,6 +75,30 @@ export const FleetManager: React.FC = () => {
   const sendCommand = async (agentId: string, cmd: string) => {
     await runToolJson("fleet_command", buildArgs({ agent_id: agentId, cmd }));
     toast(`Perintah '${cmd}' diantri untuk ${agentId}.`, { kind: "success" });
+  };
+
+  const ackAlert = async (id: string, next: string) => {
+    await runToolJson("fleet_alert_ack", buildArgs({ id, status: next }));
+    refresh();
+  };
+
+  const remediate = async (a: any) => {
+    const r = a.rule_id || "";
+    let action = "harden";
+    const extra: Record<string, string> = {};
+    if (r === "NEXUS-FW-001") action = "enable_firewall";
+    else if (r === "NEXUS-PROC-001") { action = "kill_process"; extra.process = a.target?.process || ""; }
+    else if (r === "NEXUS-SCA-001") action = "disable_guest";
+    else if (r.startsWith("NEXUS-AUTH") || r === "NEXUS-LOG-001" || r === "NEXUS-LOG-005") {
+      action = "block_ip";
+      const ip = window.prompt("Blokir IP mana?");
+      if (!ip) return;
+      extra.ip = ip;
+    }
+    if (!window.confirm(`Kirim remediasi "${action}" ke agent? (DRY-RUN — eksekusi nyata hanya jika policy.active_response aktif)`)) return;
+    const res = await runToolJson("fleet_respond", buildArgs({ agent_id: a.agent_id, action, ...extra }));
+    if (res.ok) toast(`Remediasi '${action}' diantri ke agent.`, { kind: "success" });
+    else toast(res.error || "Gagal mengirim remediasi.", { kind: "error" });
   };
 
   const copy = (text: string, label: string) => {
@@ -127,11 +154,23 @@ export const FleetManager: React.FC = () => {
 
       {/* Stat cards */}
       <div className="grid grid-cols-3 gap-2 text-center">
-        <Stat label="Status" value={isRunning || status?.running ? "ON" : "OFF"}
-              cls={isRunning || status?.running ? "text-emerald-400" : "text-nexus-subtle"} />
         <Stat label="Online" value={`${online}/${agents.length}`} />
-        <Stat label="Events" value={status?.events_total ?? events.length} />
+        <Stat label="Open alerts" value={status?.alerts_open ?? 0}
+              cls={(status?.alerts_open ?? 0) > 0 ? "text-red-400" : "text-emerald-400"} />
+        <Stat label="Risk" value={status?.risk_score ?? 0} />
       </div>
+
+      {/* Posture score (network/server/website) */}
+      {status?.posture?.scores && (
+        <div className="border border-nexus-hairline rounded p-3 bg-nexus-panel/40">
+          <h4 className="text-[10px] uppercase tracking-wide text-nexus-subtle mb-2">Security posture</h4>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <Posture label="Network" v={status.posture.scores.network_security} />
+            <Posture label="Server" v={status.posture.scores.server_hardening} />
+            <Posture label="Website" v={status.posture.scores.website_security} />
+          </div>
+        </div>
+      )}
     </div>
   );
 
@@ -148,11 +187,12 @@ export const FleetManager: React.FC = () => {
 
       <div className="border-t border-nexus-hairline bg-nexus-surface">
         <div className="flex gap-1 px-4 pt-2 border-b border-nexus-hairline">
-          {(["agents", "events", "policy"] as const).map((t) => (
+          {(["agents", "alerts", "events", "policy"] as const).map((t) => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-4 py-2 text-xs font-semibold capitalize transition-colors border-b-2 ${
                 tab === t ? "border-nexus-accent text-nexus-text" : "border-transparent text-nexus-muted hover:text-nexus-text"}`}>
-              {t === "agents" ? `Agents (${agents.length})` : t === "events" ? `Events (${events.length})` : "Policy"}
+              {t === "agents" ? `Agents (${agents.length})` : t === "alerts" ? `Alerts (${alerts.length})`
+                : t === "events" ? `Events (${events.length})` : "Policy"}
             </button>
           ))}
           <button className="ml-auto nx-btn-ghost text-xs my-1" onClick={refresh}>
@@ -186,6 +226,36 @@ export const FleetManager: React.FC = () => {
                       </td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            )
+          )}
+
+          {tab === "alerts" && (
+            alerts.length === 0 ? <Empty text="Belum ada alert. Rule engine menghasilkan alert dari event agent." /> : (
+              <table className="w-full text-xs">
+                <thead className="text-left text-nexus-muted">
+                  <tr><Th>Waktu</Th><Th>Lvl</Th><Th>Severity</Th><Th>Rule</Th><Th>Judul</Th><Th>MITRE</Th><Th>Status</Th><Th>Aksi</Th></tr>
+                </thead>
+                <tbody className="divide-y divide-nexus-hairline text-nexus-text">
+                  {alerts.map((a) => {
+                    const next = a.status === "open" ? "ack" : a.status === "ack" ? "resolved" : "open";
+                    return (
+                      <tr key={a.id} className={`hover:bg-nexus-panel/40 ${SEV_CLS[a.severity] || ""}`}>
+                        <td className="px-2 py-1.5 font-mono text-[11px] whitespace-nowrap">{a.ts_iso}</td>
+                        <td className="px-2 py-1.5 font-bold">{a.level}</td>
+                        <td className="px-2 py-1.5 uppercase text-[10px] font-bold">{a.severity}</td>
+                        <td className="px-2 py-1.5 font-mono text-[10px] text-nexus-subtle">{a.rule_id}</td>
+                        <td className="px-2 py-1.5">{a.title}<div className="text-[10px] text-nexus-subtle truncate max-w-[300px]">{a.recommendation}</div></td>
+                        <td className="px-2 py-1.5 text-[10px] text-sky-300">{(a.mitre || []).join(", ")}</td>
+                        <td className="px-2 py-1.5 text-[11px]">{a.status}</td>
+                        <td className="px-2 py-1.5 whitespace-nowrap">
+                          <button className="text-nexus-accent hover:brightness-110 text-[11px] mr-2" onClick={() => ackAlert(a.id, next)}>→{next}</button>
+                          <button className="text-emerald-400 hover:brightness-110 text-[11px]" onClick={() => remediate(a)} title="Auto-remediation (dry-run default)">🛡 Amankan</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )
@@ -257,6 +327,16 @@ const Stat: React.FC<{ label: string; value: any; cls?: string }> = ({ label, va
     <div className="text-[10px] uppercase tracking-wide text-nexus-subtle">{label}</div>
   </div>
 );
+
+const Posture: React.FC<{ label: string; v: number }> = ({ label, v }) => {
+  const cls = v >= 80 ? "text-emerald-400" : v >= 50 ? "text-yellow-400" : "text-red-400";
+  return (
+    <div>
+      <div className={`text-base font-bold ${cls}`}>{v}</div>
+      <div className="text-[10px] text-nexus-subtle">{label}</div>
+    </div>
+  );
+};
 
 const Th: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <th className="px-2 py-1.5 font-semibold">{children}</th>

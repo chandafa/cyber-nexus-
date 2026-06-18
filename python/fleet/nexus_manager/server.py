@@ -17,7 +17,9 @@ dan mengirim header CORS agar dashboard bisa juga dijalankan dari host lain.
 """
 import json
 import os
+import socket
 import sqlite3
+import ssl
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -186,6 +188,9 @@ def _ensure_config():
         _set_cfg("accept_demo", "0")        # real findings only (item #4)
     if _get_cfg("tenant") is None:
         _set_cfg("tenant", "default")
+    if _get_cfg("notify_webhook") is None:
+        _set_cfg("notify_webhook", "")
+        _set_cfg("notify_min_level", "12")  # default: alert high/critical -> webhook
 
 
 def _audit(actor, action, detail=""):
@@ -361,8 +366,38 @@ def _run_rules(c, ev, ruleset, agent_id, tenant) -> int:
         if _alert_duplicate(c, al):
             continue
         _insert_alert(c, al)
+        _notify(al)
         n += 1
     return n
+
+
+def _notify(al):
+    """Kirim alert berat ke webhook (Slack/Discord/HTTP) — best-effort, non-fatal."""
+    try:
+        wh = _get_cfg("notify_webhook") or ""
+        if not wh or al.get("level", 0) < int(_get_cfg("notify_min_level") or "12"):
+            return
+        text = (f"[NEXUS {al['severity'].upper()}/L{al['level']}] {al['title']} "
+                f"· rule {al['rule'].get('id')} · agent {al['agent_id']}")
+        payload = {"text": text, "content": text,   # Slack(text) & Discord(content)
+                   "alert": {"id": al["id"], "level": al["level"], "severity": al["severity"],
+                             "title": al["title"], "agent_id": al["agent_id"],
+                             "rule": al["rule"].get("id"), "mitre": al["rule"].get("mitre")}}
+        fc._request("POST", wh, fc.canonical(payload), {"Content-Type": "application/json"}, timeout=4)
+    except Exception:
+        pass
+
+
+def set_notify(webhook, min_level=12, actor="admin") -> dict:
+    init_db()
+    _set_cfg("notify_webhook", webhook or "")
+    try:
+        _set_cfg("notify_min_level", str(int(min_level)))
+    except Exception:
+        pass
+    _audit(actor, "notify:set", (webhook[:60] if webhook else "(disabled)"))
+    return {"ok": True, "webhook_set": bool(webhook),
+            "min_level": int(_get_cfg("notify_min_level") or "12")}
 
 
 def _correlate_vulns(c, inv_ev, ruleset, agent_id, tenant, host):
@@ -510,6 +545,10 @@ class _Handler(BaseHTTPRequestHandler):
             body = json.loads(raw.decode("utf-8")) if raw else {}
         except Exception:
             return self._send(400, {"error": "JSON tidak valid"})
+        # Anti-replay: tolak pesan agent yang stempel waktunya basi.
+        if path in ("/enroll", "/agents/enroll", "/heartbeat", "/agents/heartbeat",
+                    "/events", "/events/batch") and not fc.fresh(body):
+            return self._send(401, {"error": "pesan kedaluwarsa / replay ditolak"})
         if path in ("/enroll", "/agents/enroll"):
             return self._send(*_enroll(body, raw, self.headers.get("X-Enroll-Signature", "")))
         if path in ("/heartbeat", "/agents/heartbeat", "/events", "/events/batch"):
@@ -532,8 +571,12 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200 if r.get("ok") else 400, r)
         if path == "/response/actions":
             r = response_action(body.get("agent_id", ""), body.get("action", ""),
-                                body.get("ip", ""), body.get("target", ""))
+                                body.get("ip", ""), body.get("target", ""),
+                                body.get("process", ""))
             return self._send(200 if r.get("ok") else 400, r)
+        if path == "/notify":
+            r = set_notify(body.get("webhook", ""), body.get("min_level", 12))
+            return self._send(200, r)
         if path == "/rules":
             r = set_rules(body.get("rules", []))
             return self._send(200 if r.get("ok") else 400, r)
@@ -714,12 +757,14 @@ def import_sigma(sigma_json, actor="admin") -> dict:
     return {"ok": True, "imported": len(added), "total_rules": len(rules)}
 
 
-def response_action(agent_id, action, ip="", target="", actor="admin") -> dict:
-    """Active Response: antri perintah respon ke agent (eksekusi dgn dry-run default)."""
+def response_action(agent_id, action, ip="", target="", process="", actor="admin") -> dict:
+    """Auto-remediation ("Amankan"): antri perintah respon ke agent (dry-run default).
+    Aksi: block_ip, enable_firewall, kill_process, disable_guest, harden."""
     if not licensing.has(ent(), "active_response"):
         return {"ok": False, "error": "Active Response butuh lisensi Pro/Enterprise.",
                 "feature": "active_response"}
-    r = queue_command(agent_id, "respond", {"action": action, "ip": ip, "target": target})
+    r = queue_command(agent_id, "respond",
+                      {"action": action, "ip": ip, "target": target, "process": process})
     if r.get("ok"):
         _audit(actor, "response:" + action, f"{agent_id} {ip or target}")
     return r
@@ -861,7 +906,14 @@ def _probe_running(host, port):
     if _SERVER is not None:
         return True
     try:
-        return bool(fc.get_admin(fc.manager_url(host, port, "/health"), timeout=2).get("ok"))
+        if fc.get_admin(fc.manager_url(host, port, "/health"), timeout=2).get("ok"):
+            return True
+    except Exception:
+        pass
+    # Deployment TLS: cek apakah ada yang mendengarkan di port (HTTPS).
+    try:
+        with socket.create_connection((host, int(port)), timeout=2):
+            return True
     except Exception:
         return False
 
@@ -879,14 +931,34 @@ def manager_status(host=fc.DEFAULT_MANAGER_HOST, port=fc.DEFAULT_MANAGER_PORT) -
 
 
 # --------------------------------------------------------------------------- lifecycle
+_SCHEME = "http"
+
+
 def _make_server(host, port):
+    """Buat server; aktifkan TLS bila NEXUS_TLS_CERT/NEXUS_TLS_KEY diset."""
+    global _SCHEME
     init_db()
-    return ThreadingHTTPServer((host, port), _Handler)
+    srv = ThreadingHTTPServer((host, port), _Handler)
+    cert = os.environ.get("NEXUS_TLS_CERT", "")
+    key = os.environ.get("NEXUS_TLS_KEY", "")
+    if cert and key and os.path.isfile(cert) and os.path.isfile(key):
+        try:
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ctx.load_cert_chain(cert, key)
+            srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+            _SCHEME = "https"
+            log("[MANAGER] TLS aktif — transport terenkripsi (HTTPS).")
+        except Exception as e:
+            log(f"[MANAGER] Gagal aktifkan TLS ({e}) — lanjut HTTP.")
+            _SCHEME = "http"
+    else:
+        _SCHEME = "http"
+    return srv
 
 
 def _banner(host, port):
-    log(f"[MANAGER] Nexus Manager aktif di http://{host}:{port}/api/{fc.API_VERSION}")
-    log(f"[MANAGER] Dashboard      : http://{host}:{port}/")
+    log(f"[MANAGER] Nexus Manager aktif di {_SCHEME}://{host}:{port}/api/{fc.API_VERSION}")
+    log(f"[MANAGER] Dashboard      : {_SCHEME}://{host}:{port}/")
     log(f"[MANAGER] Enrollment key : {get_enroll_key()}")
     log(f"[MANAGER] Admin token    : {get_admin_token()}")
     e = ent()

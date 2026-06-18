@@ -397,7 +397,13 @@ def dispatch(command: str, kwargs: dict) -> dict:
         from modules import fleet_manager
         return fleet_manager.response_action(kwargs.get('agent_id', ''),
                                              kwargs.get('action', ''),
-                                             kwargs.get('ip', ''), kwargs.get('target', ''))
+                                             kwargs.get('ip', ''), kwargs.get('target', ''),
+                                             kwargs.get('process', ''))
+
+    if command == 'fleet_notify':
+        from modules import fleet_manager
+        return fleet_manager.set_notify(kwargs.get('webhook', ''),
+                                        int(kwargs.get('min_level', 12)))
 
     if command == 'fleet_policy_get':
         from modules import fleet_manager
