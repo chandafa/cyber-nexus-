@@ -231,6 +231,23 @@ def main():
     rr = mgr.response_action(agent_id, "block_ip", ip="203.0.113.9")
     check("respond command queued", rr.get("ok") is True)
 
+    print("== 25b. Log Monitoring: decoder app (laravel/nginx/auth) + rule ==")
+    from nexus_agent import collectors as C
+    check("nginx web-attack decoded", C.decode_line(
+        '1.2.3.4 - - [t] "GET /?id=1 union select pass from users HTTP/1.1" 200 -',
+        "nginx")["event_type"] == "web_attack")
+    check("nginx scanner decoded", C.decode_line(
+        '1.2.3.4 - - [t] "GET / HTTP/1.1" 200 - "-" "sqlmap/1.5"', "nginx")
+        ["event_type"] == "scanner_detected")
+    check("laravel exception decoded", C.decode_line(
+        "[2026-01-01] production.ERROR: Boom", "laravel")["event_type"] == "app_exception")
+    check("auth failed-login decoded", C.decode_line(
+        "Failed password for root from 1.2.3.4", "auth")["event_type"] == "log_failed_login")
+    ingest([{"type": "log", "source": "logcollector", "severity": "critical",
+             "event_type": "web_attack", "title": "SQLi attempt", "origin": "real"}])
+    check("NEXUS-LOG-001 fired (web attack)",
+          any(a["rule_id"] == "NEXUS-LOG-001" for a in mgr.list_alerts(500)["alerts"]))
+
     print("== 26. Lisensi valid (enterprise) terverifikasi ==")
     ls = mgr.license_status()
     check("license valid", ls["valid"] and ls["tier"] == "enterprise")

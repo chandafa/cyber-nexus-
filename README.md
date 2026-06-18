@@ -68,7 +68,7 @@ oleh desktop app (adapter tipis di `python/modules/fleet_*.py`) **dan** bisa jal
 | Komponen | Paket | Peran |
 |----------|-------|-------|
 | **nexus-manager** | `python/fleet/nexus_manager` | API server pusat: enrollment, heartbeat, ingest+normalisasi event, **rule engine + alert engine**, policy, audit, retention, report. |
-| **nexus-agent** | `python/fleet/nexus_agent` | Daemon endpoint ringan: heartbeat, **FIM**, SCA, software inventory, port/user/disk/firewall, **web-app audit (Laravel/.env)**, event queue store-and-forward. |
+| **nexus-agent** | `python/fleet/nexus_agent` | Daemon endpoint ringan: heartbeat, **FIM**, **Log Monitoring (parser Laravel/Nginx/auth)**, SCA, software inventory, port/user/disk/firewall, **web-app audit (Laravel/.env)**, event queue store-and-forward. |
 | **nexus-cli** | `python/fleet/nexus_cli` | Console interaktif (menu Network & Website security) **+** admin: `agents/events/alerts/ack/report/policy/command`. |
 | **nexus-dashboard** | `python/fleet/nexus_dashboard` | UI web monitoring (alerts, agents, events, risk score) — disajikan manager di `/`. |
 | *shared* | `python/fleet/nexus_common` | Protokol HMAC + **skema baku event/alert/report** (OCSF-leaning, `origin: real\|demo`). |

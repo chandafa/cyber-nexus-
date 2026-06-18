@@ -203,4 +203,47 @@ DEFAULT_RULES = [
         "recommendation": "Set APP_ENV/NODE_ENV=production untuk deployment live.",
         "response": ["notify"],
     },
+    # ---- Log Monitoring (ala-Wazuh) ----
+    {
+        "id": "NEXUS-LOG-001", "name": "Pola serangan web pada request (SQLi/XSS/traversal)",
+        "category": "web_activity", "level": 13, "mitre": ["T1190", "T1059"],
+        "conditions": {"event_type": "web_attack"},
+        "recommendation": "Blokir IP sumber, periksa WAF, validasi/escape input, audit endpoint.",
+        "response": ["notify", "create_incident"],
+    },
+    {
+        "id": "NEXUS-LOG-002", "name": "Scanner/recon terdeteksi di log akses web",
+        "category": "web_activity", "level": 8, "mitre": ["T1595"],
+        "conditions": {"event_type": "scanner_detected"},
+        "recommendation": "Rate-limit/blokir pemindai; pastikan tak ada endpoint sensitif terekspos.",
+        "response": ["notify"],
+    },
+    {
+        "id": "NEXUS-LOG-003", "name": "Exception Laravel di log produksi",
+        "category": "application", "level": 9, "mitre": ["T1190"],
+        "conditions": {"event_type": "app_exception"},
+        "recommendation": "Selidiki error; jangan tampilkan trace ke publik; perbaiki bug.",
+        "response": ["notify"],
+    },
+    {
+        "id": "NEXUS-LOG-004", "name": "Lonjakan error server (5xx) dari log web",
+        "category": "web_activity", "level": 5, "mitre": [],
+        "conditions": {"event_type": "server_error"},
+        "recommendation": "Cek kesehatan backend/DB; pantau ketersediaan layanan.",
+        "response": ["notify"],
+    },
+    {
+        "id": "NEXUS-LOG-005", "name": "Login gagal terdeteksi di log (brute-force)",
+        "category": "authentication", "level": 7, "mitre": ["T1110"],
+        "conditions": {"event_type": "log_failed_login"},
+        "recommendation": "Terapkan fail2ban/rate-limit; audit akun & sumber IP.",
+        "response": ["notify"],
+    },
+    {
+        "id": "NEXUS-LOG-006", "name": "Lonjakan CSRF 419 (kemungkinan tampering)",
+        "category": "web_activity", "level": 5, "mitre": ["T1592"],
+        "conditions": {"event_type": "csrf"},
+        "recommendation": "Periksa sesi/cookie & kemungkinan manipulasi form/callback.",
+        "response": ["notify"],
+    },
 ]

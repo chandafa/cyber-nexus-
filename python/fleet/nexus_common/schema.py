@@ -36,6 +36,8 @@ CATEGORY_MAP = {
     "software_inventory": ("software_inventory", "package_list"),
     "sca": ("config_assessment", "policy_check"),
     "vulnerability": ("vulnerability_finding", "cve_match"),
+    "log": ("log_activity", "log_event"),
+    "webaudit": ("config_assessment", "web_config"),
 }
 
 

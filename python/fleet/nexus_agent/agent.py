@@ -91,8 +91,11 @@ def collect_all():
     out = []
     for name in enabled:
         try:
-            events = _fim_collect(pol) if name == "fim" else None
-            if events is None:
+            if name == "fim":
+                events = _fim_collect(pol)
+            elif name == "logmonitor":
+                events = _logmon_collect(pol)
+            else:
                 fn = collectors.REGISTRY.get(name)
                 if not fn:
                     continue
@@ -165,6 +168,44 @@ def _fim_collect(pol):
                            "target": {"path": f}, "evidence": {"old_hash": old}})
     _set("fim_baseline", json.dumps(current))
     return events
+
+
+# --------------------------------------------------------------------------- Log Monitoring (ala-Wazuh)
+def _logmon_collect(pol):
+    """Pantau berkas log secara kontinu: baca HANYA baris baru (simpan offset),
+    decode per tipe (laravel/nginx/auth/generic) -> event keamanan."""
+    paths = pol.get("log_paths", []) or []
+    if not paths:
+        return []
+    out = []
+    for entry in paths:
+        path = entry.get("path") if isinstance(entry, dict) else entry
+        ltype = (entry.get("type") if isinstance(entry, dict) else "") or collectors.detect_logtype(path)
+        if not path or not os.path.isfile(path):
+            continue
+        key = "logoff:" + path
+        try:
+            size = os.path.getsize(path)
+            off = int(_get(key, "0") or 0)
+            if off > size:            # file dirotasi/terpotong -> mulai dari awal
+                off = 0
+            with open(path, encoding="utf-8", errors="replace") as f:
+                f.seek(off)
+                lines = f.readlines(1_000_000)   # batasi beban per siklus
+                new_off = f.tell()
+            _set(key, str(new_off))
+            for line in lines[:500]:
+                line = line.rstrip("\n")
+                if not line:
+                    continue
+                ev = collectors.decode_line(line, ltype)
+                if ev:
+                    ev["detail"] = line[:300]
+                    ev["target"] = {"path": path}
+                    out.append(ev)
+        except Exception as ex:
+            log(f"[AGENT] logmonitor {path} error: {ex}")
+    return out
 
 
 # --------------------------------------------------------------------------- networking

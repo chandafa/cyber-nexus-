@@ -65,12 +65,15 @@ DEFAULT_POLICY = {
     "collect_interval": fc.COLLECT_INTERVAL,
     "collectors": ["system", "listening_ports", "logged_users", "disk",
                    "firewall", "failed_logins", "fim", "sca",
-                   "software_inventory", "webaudit"],
+                   "software_inventory", "webaudit", "logmonitor"],
     "risky_ports": [21, 23, 25, 135, 139, 445, 1433, 3306, 3389, 5900, 6379, 27017],
     # File Integrity Monitoring — path yang dipantau (hash baseline).
     "fim_paths": [],
     # Web/app audit — root project Laravel/Node yang dicek (.env, APP_DEBUG, dll).
     "webaudit_paths": [],
+    # Log Monitoring — berkas log yang dipantau. Item: path atau {path,type}.
+    # type: laravel|nginx|auth|generic (auto-deteksi bila kosong).
+    "log_paths": [],
     # Active Response: false = DRY-RUN (hanya log), true = eksekusi blokir nyata.
     "active_response": False,
     "min_report_severity": "info",
