@@ -42,6 +42,10 @@ def _init():
         c.execute("CREATE TABLE queue (id INTEGER PRIMARY KEY AUTOINCREMENT, "
                   "ts INTEGER, payload TEXT)")
     c.commit(); c.close()
+    try:                                  # mitigasi at-rest: batasi izin file state agent
+        os.chmod(fc.agent_state_path(), 0o600)
+    except Exception:
+        pass
 
 
 def _get(key, default=None):
@@ -84,8 +88,40 @@ def _queue_size():
 
 
 # --------------------------------------------------------------------------- collect
+def _effective_policy():
+    """Gabungkan policy manager dgn `watch_paths` lokal agent (onboarding 1-perintah):
+    arahkan FIM/web-audit/log ke project tanpa harus mengubah policy pusat."""
+    pol = dict(_policy())
+    try:
+        watch = json.loads(_get("watch_paths", "[]") or "[]")
+    except Exception:
+        watch = []
+    if not watch:
+        return pol
+    wp = list(pol.get("webaudit_paths", []))
+    fp = list(pol.get("fim_paths", []))
+    lp = list(pol.get("log_paths", []))
+    cols = list(pol.get("collectors", collectors.NAMES))
+    for w in watch:
+        if os.path.isdir(w):
+            wp.append(w)
+            envf = os.path.join(w, ".env")
+            if os.path.isfile(envf):
+                fp.append(envf)
+        elif w.endswith(".log") and os.path.isfile(w):
+            lp.append(w)
+        elif os.path.isfile(w):
+            fp.append(w)
+    pol["webaudit_paths"], pol["fim_paths"], pol["log_paths"] = wp, fp, lp
+    for c in ("webaudit", "fim", "logmonitor"):
+        if c not in cols:
+            cols.append(c)
+    pol["collectors"] = cols
+    return pol
+
+
 def collect_all():
-    pol = _policy()
+    pol = _effective_policy()
     enabled = pol.get("collectors", collectors.NAMES)
     min_sev = _SEV_RANK.get(pol.get("min_report_severity", "info"), 0)
     out = []
@@ -209,20 +245,45 @@ def _logmon_collect(pol):
 
 
 # --------------------------------------------------------------------------- networking
+def _pin_path():
+    return os.path.join(os.path.dirname(fc.agent_state_path()), "manager_cert.pem")
+
+
+def _ensure_tls():
+    """Muat sertifikat manager yang di-pin (TOFU) bila skema HTTPS."""
+    if _get("manager_scheme", "http") == "https":
+        pin = _pin_path()
+        fc.set_client_tls(cafile=pin if os.path.isfile(pin) else "", insecure=not os.path.isfile(pin))
+
+
 def _murl(path):
     return fc.manager_url(_get("manager_host", fc.DEFAULT_MANAGER_HOST),
-                          _get("manager_port", fc.DEFAULT_MANAGER_PORT), path)
+                          _get("manager_port", fc.DEFAULT_MANAGER_PORT), path,
+                          scheme=_get("manager_scheme", "http"))
 
 
-def enroll(manager_host, manager_port, enroll_key, name="", labels=None):
+def enroll(manager_host, manager_port, enroll_key, name="", labels=None, tls=False, watch=None):
     _init()
     fp = fc.host_fingerprint()
     if isinstance(labels, str):
         labels = [x.strip() for x in labels.split(",") if x.strip()]
+    if isinstance(watch, str):
+        watch = [x.strip() for x in watch.split(",") if x.strip()]
+    _set("watch_paths", json.dumps(watch or []))
+    scheme = "https" if tls else "http"
+    # TLS TOFU: ambil & pin sertifikat manager saat kontak pertama.
+    if tls:
+        try:
+            with open(_pin_path(), "w", encoding="utf-8") as f:
+                f.write(fc.fetch_server_cert(manager_host, manager_port))
+            fc.set_client_tls(cafile=_pin_path())
+            log("[AGENT] Sertifikat manager di-pin (TLS TOFU).")
+        except Exception as e:
+            return {"module": "fleet_agent", "ok": False, "error": f"gagal pin TLS cert: {e}"}
     body = {"name": name or fp["hostname"], "fingerprint": fp, "ip": fc.local_ip(),
             "labels": labels or []}
     try:
-        resp = fc.post_enroll(fc.manager_url(manager_host, manager_port, "/enroll"),
+        resp = fc.post_enroll(fc.manager_url(manager_host, manager_port, "/enroll", scheme=scheme),
                               body, enroll_key)
     except fc.HttpError as e:
         return {"module": "fleet_agent", "ok": False, "error": f"{e.status}: {e.body}"}
@@ -230,6 +291,7 @@ def enroll(manager_host, manager_port, enroll_key, name="", labels=None):
         return {"module": "fleet_agent", "ok": False, "error": str(e)}
     _set("manager_host", manager_host)
     _set("manager_port", str(manager_port))
+    _set("manager_scheme", scheme)
     _set("agent_id", resp["agent_id"])
     _set("agent_key", resp["agent_key"])
     _set("name", body["name"])
@@ -267,35 +329,72 @@ def _flush_queue():
     return len(ids)
 
 
+def _remediation_plan(action, ip, proc):
+    """Bangun daftar perintah (cmd) untuk aksi remediasi + deskripsi. (None, alasan) bila invalid."""
+    import ipaddress
+    import platform
+    win = platform.system() == "Windows"
+    if action == "block_ip":
+        try:
+            ipaddress.ip_address(ip)
+        except ValueError:
+            return None, "IP tidak valid"
+        cmd = (["netsh", "advfirewall", "firewall", "add", "rule", f"name=NexusBlock-{ip}",
+                "dir=in", "action=block", f"remoteip={ip}"] if win
+               else ["iptables", "-A", "INPUT", "-s", ip, "-j", "DROP"])
+        return [cmd], f"blokir IP {ip} di firewall"
+    if action == "enable_firewall":
+        cmd = (["netsh", "advfirewall", "set", "allprofiles", "state", "on"] if win
+               else ["ufw", "--force", "enable"])
+        return [cmd], "aktifkan firewall host"
+    if action == "kill_process":
+        if not proc:
+            return None, "nama proses kosong"
+        cmd = ["taskkill", "/F", "/IM", proc] if win else ["pkill", "-f", proc]
+        return [cmd], f"hentikan proses {proc}"
+    if action == "disable_guest":
+        cmd = ["net", "user", "guest", "/active:no"] if win else ["usermod", "-L", "guest"]
+        return [cmd], "nonaktifkan akun Guest"
+    if action == "harden":
+        fw = (["netsh", "advfirewall", "set", "allprofiles", "state", "on"] if win
+              else ["ufw", "--force", "enable"])
+        guest = ["net", "user", "guest", "/active:no"] if win else ["usermod", "-L", "guest"]
+        return [fw, guest], "hardening dasar (firewall + nonaktif Guest)"
+    return None, "aksi tidak dikenal"
+
+
 def _active_response(args):
-    """Active Response (item Active Response). DEFAULT DRY-RUN untuk keamanan/etika:
-    hanya jalankan blokir nyata bila policy `active_response` diaktifkan."""
+    """Auto-remediation ("Amankan"). DEFAULT DRY-RUN demi keamanan/etika — eksekusi
+    nyata hanya bila policy `active_response` aktif. Aksi: block_ip, enable_firewall,
+    kill_process, disable_guest, harden."""
     import subprocess
     action = args.get("action", "")
     ip = args.get("ip", "") or args.get("target", "")
+    proc = args.get("process", "")
+    cmds, detail = _remediation_plan(action, ip, proc)
+    if cmds is None:
+        log(f"[AGENT] Active Response ditolak: {detail} (action={action}).")
+        _enqueue([{"type": "response", "severity": "low", "event_type": "active_response",
+                   "title": f"Active Response ditolak: {detail}",
+                   "data": {"action": action, "executed": False, "reason": detail},
+                   "origin": "real", "source": "response"}])
+        return
     enabled = str(_policy().get("active_response", "")).lower() in ("1", "true", "yes")
     executed = False
-    if action == "block_ip" and ip:
-        if enabled:
-            try:
-                if __import__("platform").system() == "Windows":
-                    cmd = ["netsh", "advfirewall", "firewall", "add", "rule",
-                           f"name=NexusBlock-{ip}", "dir=in", "action=block", f"remoteip={ip}"]
-                else:
-                    cmd = ["iptables", "-A", "INPUT", "-s", ip, "-j", "DROP"]
-                subprocess.run(cmd, capture_output=True, timeout=10)
-                executed = True
-                log(f"[AGENT] Active Response: IP {ip} DIBLOKIR di firewall.")
-            except Exception as e:
-                log(f"[AGENT] Active Response gagal: {e}")
-        else:
-            log(f"[AGENT] (DRY-RUN) block_ip {ip} — aktifkan policy.active_response utk eksekusi.")
+    if enabled:
+        try:
+            for cmd in cmds:
+                subprocess.run(cmd, capture_output=True, timeout=15)
+            executed = True
+            log(f"[AGENT] Active Response DIJALANKAN: {detail}.")
+        except Exception as e:
+            log(f"[AGENT] Active Response gagal: {e}")
     else:
-        log(f"[AGENT] Active Response: aksi '{action}' tidak dikenal/lengkap.")
+        log(f"[AGENT] (DRY-RUN) {detail} — aktifkan policy.active_response untuk eksekusi.")
     _enqueue([{"type": "response", "severity": "medium", "event_type": "active_response",
-               "title": f"Active Response: {action} {ip} ({'executed' if executed else 'dry-run'})",
-               "detail": f"action={action} ip={ip} executed={executed}",
-               "target": {"ip": ip}, "data": {"action": action, "executed": executed},
+               "title": f"Active Response: {detail} ({'executed' if executed else 'dry-run'})",
+               "detail": detail, "target": {"ip": ip, "process": proc},
+               "data": {"action": action, "executed": executed},
                "origin": "real", "source": "response"}])
 
 
@@ -341,8 +440,9 @@ def run_foreground(**kwargs):
         log("[AGENT] Belum ter-enroll. Jalankan enrollment dulu.")
         return {"module": "fleet_agent", "status": "error", "error": "not_enrolled"}
     _RUN = True
+    _ensure_tls()                          # muat pin TLS bila skema https
     log(f"[AGENT] Daemon mulai: {_get('agent_id')} -> "
-        f"{_get('manager_host')}:{_get('manager_port')}")
+        f"{_get('manager_scheme', 'http')}://{_get('manager_host')}:{_get('manager_port')}")
     last_hb = last_collect = 0
     _enqueue(collect_all())
     try:

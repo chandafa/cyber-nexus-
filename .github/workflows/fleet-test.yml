@@ -1,0 +1,25 @@
+name: Fleet Tests
+
+# Jalankan test suite Nexus Fleet pada setiap push/PR yang menyentuh kode fleet.
+on:
+  push:
+    paths: ["python/fleet/**", "python/tests/test_fleet.py", ".github/workflows/fleet-test.yml"]
+  pull_request:
+    paths: ["python/fleet/**", "python/tests/test_fleet.py"]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run fleet test suite
+        env:
+          PYTHONPATH: python/fleet
+        run: python python/tests/test_fleet.py

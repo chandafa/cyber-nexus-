@@ -32,6 +32,9 @@ def main(argv=None):
     e.add_argument("--key", required=True, help="enrollment key dari manager")
     e.add_argument("--name", default="")
     e.add_argument("--labels", default="", help="label/grup, dipisah koma (mis. prod,web)")
+    e.add_argument("--tls", action="store_true", help="hubungkan via HTTPS (pin sertifikat manager)")
+    e.add_argument("--watch", default="",
+                   help="path project/log untuk dipantau otomatis (FIM/web-audit/log), dipisah koma")
     sub.add_parser("start", help="jalankan daemon (blocking)")
     sub.add_parser("status")
     sub.add_parser("reset")
@@ -40,7 +43,7 @@ def main(argv=None):
 
     if args.action == "enroll":
         print(json.dumps(agent.enroll(args.host, args.port, args.key, args.name,
-                                      args.labels), indent=2))
+                                      args.labels, tls=args.tls, watch=args.watch), indent=2))
         return 0
     if args.action == "start":
         agent.run_foreground()

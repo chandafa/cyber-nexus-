@@ -389,6 +389,10 @@ def dispatch(command: str, kwargs: dict) -> dict:
             fleet_manager.reload_license()
         return fleet_manager.license_status()
 
+    if command == 'fleet_license_apply':
+        from modules import fleet_manager
+        return fleet_manager.apply_license(kwargs.get('token', ''))
+
     if command == 'fleet_vulndb_get':
         from modules import fleet_manager
         return {'module': 'fleet_manager', 'vuln_db': fleet_manager.get_vulndb()}
@@ -405,7 +409,13 @@ def dispatch(command: str, kwargs: dict) -> dict:
         from modules import fleet_manager
         return fleet_manager.response_action(kwargs.get('agent_id', ''),
                                              kwargs.get('action', ''),
-                                             kwargs.get('ip', ''), kwargs.get('target', ''))
+                                             kwargs.get('ip', ''), kwargs.get('target', ''),
+                                             kwargs.get('process', ''))
+
+    if command == 'fleet_notify':
+        from modules import fleet_manager
+        return fleet_manager.set_notify(kwargs.get('webhook', ''),
+                                        int(kwargs.get('min_level', 12)))
 
     if command == 'fleet_policy_get':
         from modules import fleet_manager
@@ -431,7 +441,8 @@ def dispatch(command: str, kwargs: dict) -> dict:
                                   kwargs.get('port', '8765'),
                                   kwargs.get('enroll_key', ''),
                                   kwargs.get('name', ''),
-                                  kwargs.get('labels', ''))
+                                  kwargs.get('labels', ''),
+                                  watch=kwargs.get('watch', ''))
 
     if command == 'agent_start':
         from modules import fleet_agent

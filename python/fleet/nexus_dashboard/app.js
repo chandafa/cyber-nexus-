@@ -62,11 +62,48 @@ function renderAlerts(alerts) {
       <td>${esc(a.title)}<br><span style="color:var(--subtle);font-size:10px">${esc(a.recommendation || "")}</span></td>
       <td style="color:var(--low)">${esc(mitre)}</td>
       <td style="color:var(--subtle)">${esc((a.agent_id || "").slice(0, 12))}</td>
-      <td><button class="act" data-id="${esc(a.id)}" data-next="${next}">${esc(a.status)} → ${next}</button></td>`;
+      <td>
+        <button class="act" data-id="${esc(a.id)}" data-next="${next}">${esc(a.status)} → ${next}</button>
+        <button class="act fix" data-rid="${esc(a.rule_id || "")}" data-agent="${esc(a.agent_id || "")}"
+          data-proc="${esc((a.target && a.target.process) || "")}" title="Auto-remediation (dry-run default)">🛡 Amankan</button>
+      </td>`;
     tb.appendChild(tr);
   }
-  tb.querySelectorAll(".act").forEach((b) =>
+  tb.querySelectorAll(".act:not(.fix)").forEach((b) =>
     b.addEventListener("click", () => ackAlert(b.dataset.id, b.dataset.next)));
+  tb.querySelectorAll(".act.fix").forEach((b) =>
+    b.addEventListener("click", () => remediate(b.dataset.rid, b.dataset.agent, b.dataset.proc)));
+}
+
+function suggestedAction(ruleId, proc) {
+  if (ruleId === "NEXUS-FW-001") return { action: "enable_firewall" };
+  if (ruleId === "NEXUS-PROC-001") return { action: "kill_process", process: proc };
+  if (ruleId === "NEXUS-SCA-001") return { action: "disable_guest" };
+  if (ruleId.startsWith("NEXUS-AUTH") || ruleId === "NEXUS-LOG-005" || ruleId === "NEXUS-LOG-001")
+    return { action: "block_ip" };
+  return { action: "harden" };
+}
+
+async function remediate(ruleId, agentId, proc) {
+  const sug = suggestedAction(ruleId, proc);
+  if (sug.action === "block_ip") {
+    const ip = prompt("Blokir IP mana? (kosongkan untuk batal)");
+    if (!ip) return;
+    sug.ip = ip;
+  }
+  if (!confirm(`Kirim remediasi "${sug.action}" ke agent?\n` +
+      `(Default DRY-RUN — eksekusi nyata hanya jika policy.active_response aktif.)`)) return;
+  try {
+    const r = await fetch(base() + "/response/actions", {
+      method: "POST",
+      headers: { ...headers(), "Content-Type": "application/json" },
+      body: JSON.stringify({ agent_id: agentId, ...sug }),
+    });
+    const j = await r.json();
+    alert(j.ok ? `Remediasi "${sug.action}" diantri ke agent.` : `Gagal: ${j.error || r.status}`);
+  } catch (e) {
+    alert("Gagal: " + e.message);
+  }
 }
 
 async function ackAlert(id, status) {

@@ -271,6 +271,51 @@ def main():
     check("NEXUS-PROC-001 fired (suspicious process)",
           any(a["rule_id"] == "NEXUS-PROC-001" for a in mgr.list_alerts(500)["alerts"]))
 
+    print("== 25e. Anti-replay (timestamp) + validasi IP Active Response ==")
+    stale = fc.canonical({"events": [], "_ts": fc.now() - 1000})
+    try:
+        fc._request("POST", fc.manager_url("127.0.0.1", PORT, "/events"), stale,
+                    {"X-Agent-Id": agent_id, "X-Signature": fc.sign(akey, stale)})
+        check("stale message rejected (anti-replay)", False)
+    except fc.HttpError as ex:
+        check("stale message rejected (anti-replay)", ex.status == 401)
+    agt._active_response({"action": "block_ip", "ip": "bukan-ip-valid"})
+    last = agt._conn().execute("SELECT payload FROM queue ORDER BY id DESC LIMIT 1").fetchone()
+    rev = json.loads(last[0]) if last else {}
+    check("IP tidak valid ditolak Active Response",
+          rev.get("data", {}).get("executed") is False
+          and "IP" in str(rev.get("data", {}).get("reason", "")))
+
+    print("== 25f. Auto-remediation actions + notifikasi (best-effort) ==")
+    p1, _ = agt._remediation_plan("enable_firewall", "", "")
+    check("plan enable_firewall", p1 is not None)
+    p2, _ = agt._remediation_plan("harden", "", "")
+    check("plan harden (2 langkah)", p2 is not None and len(p2) == 2)
+    p3, _ = agt._remediation_plan("kill_process", "", "")
+    check("kill_process tanpa nama ditolak", p3 is None)
+    agt._active_response({"action": "enable_firewall"})   # dry-run (policy enterprise tak set active_response)
+    lastr = json.loads(agt._conn().execute(
+        "SELECT payload FROM queue ORDER BY id DESC LIMIT 1").fetchone()[0])
+    check("enable_firewall dry-run (tidak dieksekusi)",
+          lastr["data"]["executed"] is False and lastr["event_type"] == "active_response")
+    check("set_notify config", mgr.set_notify("http://127.0.0.1:9/none", 10).get("min_level") == 10)
+    r_robust = ingest([{"type": "webaudit", "severity": "high", "event_type": "git_exposed",
+                        "title": "git", "target": {"path": "/z/.git"}, "origin": "real"}])
+    check("ingest tetap sukses walau webhook gagal", r_robust.get("ok") is True)
+    mgr.set_notify("", 12)
+
+    print("== 25g. Fix: CVE version-from-name + agent watch effective-policy ==")
+    from nexus_manager import vulndb as VD
+    fnd = VD.match([{"name": "OpenSSL 1.1.1n", "version": ""}])   # versi kosong -> urai dari nama
+    check("CVE cocok dari DisplayName (versi diurai)",
+          any(str(x["cve"]).startswith("CVE-") for x in fnd))
+    import tempfile as _tf
+    agt._set("watch_paths", json.dumps([_tf.gettempdir()]))
+    ep = agt._effective_policy()
+    check("watch -> webaudit_paths terisi & collector aktif",
+          len(ep.get("webaudit_paths", [])) >= 1 and "webaudit" in ep.get("collectors", []))
+    agt._set("watch_paths", "[]")
+
     print("== 26. Lisensi valid (enterprise) terverifikasi ==")
     ls = mgr.license_status()
     check("license valid", ls["valid"] and ls["tier"] == "enterprise")
@@ -292,6 +337,13 @@ def main():
              "evidence": {"old_hash": "a", "new_hash": "b"}, "origin": "real"}])
     fim_after = len([a for a in mgr.list_alerts(500)["alerts"] if a["rule_id"] == "NEXUS-FIM-001"])
     check("premium FIM rule filtered on free", fim_after == fim_before)
+
+    print("== 27b. Fix: license HOT-RELOAD (free -> pro tanpa restart manager) ==")
+    pro_tok = lic.issue(_SEED, "HotReload", tier="pro", days=365, max_agents=5)
+    ra = mgr.apply_license(pro_tok)
+    check("apply_license hot-reload -> pro", ra.get("ok") and ra.get("tier") == "pro")
+    mgr.apply_license("")          # kembali ke free utk seksi 28
+    check("apply kosong -> free", mgr.license_status()["tier"] == "free")
 
     print("== 28. Gerbang FREE: batas jumlah agent (seat) ==")
     c = mgr._conn()

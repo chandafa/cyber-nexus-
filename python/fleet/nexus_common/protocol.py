@@ -16,6 +16,7 @@ import json
 import os
 import platform
 import socket
+import ssl
 import time
 import uuid
 import urllib.request
@@ -27,6 +28,7 @@ DEFAULT_MANAGER_PORT = 8765
 HEARTBEAT_INTERVAL = 30          # detik antar-heartbeat (default policy)
 COLLECT_INTERVAL = 120           # detik antar-siklus pengumpulan telemetri
 OFFLINE_AFTER = 90               # detik tanpa heartbeat -> dianggap offline
+REPLAY_WINDOW = 300              # detik: tolak pesan ber-stempel-waktu basi (anti-replay)
 
 SEVERITIES = ("info", "low", "medium", "high", "critical")
 
@@ -104,11 +106,35 @@ def verify(key: str, raw: bytes, sig: str) -> bool:
         return False
 
 
-def manager_url(host: str, port, path: str = "") -> str:
-    base = f"http://{host}:{int(port)}/api/{API_VERSION}"
+def manager_url(host: str, port, path: str = "", scheme: str = "http") -> str:
+    base = f"{scheme}://{host}:{int(port)}/api/{API_VERSION}"
     if not path:
         return base
     return base + (path if path.startswith("/") else "/" + path)
+
+
+# --------------------------------------------------------------------------- TLS
+_CLIENT_CTX = None
+
+
+def set_client_tls(cafile: str = "", insecure: bool = False):
+    """Konfigurasi verifikasi TLS klien (agent). cafile = cert manager yang di-pin."""
+    global _CLIENT_CTX
+    if not cafile and not insecure:
+        _CLIENT_CTX = None
+        return
+    ctx = ssl.create_default_context()
+    if cafile:
+        ctx.load_verify_locations(cafile)
+    if insecure:
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    _CLIENT_CTX = ctx
+
+
+def fetch_server_cert(host: str, port) -> str:
+    """Ambil sertifikat server (PEM) untuk TOFU pinning saat enrollment HTTPS."""
+    return ssl.get_server_certificate((host, int(port)))
 
 
 # --------------------------------------------------------------------------- HTTP client (stdlib)
@@ -124,8 +150,11 @@ def _request(method: str, url: str, raw: bytes = b"", headers=None, timeout=15) 
     req.add_header("Content-Type", "application/json")
     for k, v in (headers or {}).items():
         req.add_header(k, v)
+    kw = {}
+    if url.lower().startswith("https") and _CLIENT_CTX is not None:
+        kw["context"] = _CLIENT_CTX
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with urllib.request.urlopen(req, timeout=timeout, **kw) as r:
             data = r.read().decode("utf-8", "replace")
             return json.loads(data) if data.strip() else {}
     except urllib.error.HTTPError as e:
@@ -137,8 +166,16 @@ def _request(method: str, url: str, raw: bytes = b"", headers=None, timeout=15) 
         raise HttpError(e.code, body)
 
 
+def fresh(body: dict, window: int = REPLAY_WINDOW) -> bool:
+    """True bila stempel waktu `_ts` di body masih dalam jendela (anti-replay)."""
+    try:
+        return abs(now() - int(body.get("_ts", 0))) <= window
+    except Exception:
+        return False
+
+
 def post_signed(url: str, body: dict, agent_id: str, agent_key: str, timeout=15) -> dict:
-    raw = canonical(body)
+    raw = canonical({**body, "_ts": now()})       # stempel waktu (anti-replay)
     return _request("POST", url, raw, {
         "X-Agent-Id": agent_id,
         "X-Signature": sign(agent_key, raw),
@@ -146,7 +183,7 @@ def post_signed(url: str, body: dict, agent_id: str, agent_key: str, timeout=15)
 
 
 def post_enroll(url: str, body: dict, enroll_key: str, timeout=15) -> dict:
-    raw = canonical(body)
+    raw = canonical({**body, "_ts": now()})
     return _request("POST", url, raw, {"X-Enroll-Signature": sign(enroll_key, raw)}, timeout)
 
 
