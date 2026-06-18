@@ -248,6 +248,18 @@ def main():
     check("NEXUS-LOG-001 fired (web attack)",
           any(a["rule_id"] == "NEXUS-LOG-001" for a in mgr.list_alerts(500)["alerts"]))
 
+    print("== 25c. Vulnerability Detection (inventory software -> CVE) ==")
+    ingest([{"type": "software_inventory", "severity": "info", "title": "inv",
+             "data": {"packages": [{"name": "OpenSSL", "version": "1.1.1n"},
+                                   {"name": "Log4j Core", "version": "2.14.0"},
+                                   {"name": "SafeApp", "version": "9.9.9"}]}, "origin": "real"}])
+    vulns = [a for a in mgr.list_alerts(500)["alerts"] if a["rule_id"] == "NEXUS-VULN-001"]
+    check("NEXUS-VULN-001 fired dari inventory", len(vulns) >= 1)
+    check("alert membawa CVE di evidence",
+          any(str(a["evidence"].get("cve", "")).startswith("CVE-") for a in vulns))
+    check("Log4Shell (CVE-2021-44228) terdeteksi",
+          any(a["evidence"].get("cve") == "CVE-2021-44228" for a in vulns))
+
     print("== 26. Lisensi valid (enterprise) terverifikasi ==")
     ls = mgr.license_status()
     check("license valid", ls["valid"] and ls["tier"] == "enterprise")

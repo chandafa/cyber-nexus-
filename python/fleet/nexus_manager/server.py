@@ -178,6 +178,9 @@ def _ensure_config():
         _set_cfg("policy_version", "1")
     if _get_cfg("rules") is None:
         _set_cfg("rules", json.dumps(ruleengine.DEFAULT_RULES))
+    if _get_cfg("vuln_db") is None:
+        from nexus_manager import vulndb
+        _set_cfg("vuln_db", json.dumps(vulndb.DEFAULT_VULN_DB))
     if _get_cfg("accept_demo") is None:
         _set_cfg("accept_demo", "0")        # real findings only (item #4)
     if _get_cfg("tenant") is None:
@@ -308,21 +311,15 @@ def _ingest_events(agent_id, body) -> tuple:
             skipped += 1
             continue
         ev = schema.enrich_event(ev, agent_id=agent_id, tenant_id=tenant, host=host)
-        c.execute(
-            "INSERT INTO events(event_id,agent_id,tenant_id,ts,source,type,category,"
-            "event_type,severity,origin,title,detail,host,target,evidence,data) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (ev["event_id"], agent_id, tenant, ev["ts"], ev["source"], ev["type"],
-             ev["category"], ev["event_type"], ev["severity"], ev["origin"],
-             ev["title"], ev["detail"], json.dumps(host),
-             json.dumps(ev["target"]), json.dumps(ev["evidence"]), json.dumps(ev["data"])))
+        _insert_event(c, ev, agent_id, tenant, host)
         stored += 1
         # Item #3: rule engine -> alert (dgn dedup utk kurangi alert fatigue)
-        for al in ruleengine.evaluate(ev, ruleset, agent_id, tenant):
-            if _alert_duplicate(c, al):
-                continue
-            _insert_alert(c, al)
-            n_alerts += 1
+        n_alerts += _run_rules(c, ev, ruleset, agent_id, tenant)
+        # Vulnerability Detection: korelasi inventori software ↔ CVE (sisi manager)
+        if ev["type"] == "software_inventory" and licensing.has(ent(), "advanced_rules"):
+            ds, da = _correlate_vulns(c, ev, ruleset, agent_id, tenant, host)
+            stored += ds
+            n_alerts += da
     c.execute("UPDATE agents SET last_seen=? WHERE agent_id=?", (fc.now(), agent_id))
     c.commit(); c.close()
     _prune()
@@ -344,6 +341,72 @@ def _alert_duplicate(c, al) -> bool:
         "AND ts>=? AND target=? LIMIT 1",
         (rule_id, al["agent_id"], fc.now() - DEDUP_WINDOW, target_json)).fetchone()
     return row is not None
+
+
+def _insert_event(c, ev, agent_id, tenant, host):
+    c.execute(
+        "INSERT INTO events(event_id,agent_id,tenant_id,ts,source,type,category,"
+        "event_type,severity,origin,title,detail,host,target,evidence,data) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (ev["event_id"], agent_id, tenant, ev["ts"], ev["source"], ev["type"],
+         ev["category"], ev["event_type"], ev["severity"], ev["origin"],
+         ev["title"], ev["detail"], json.dumps(host),
+         json.dumps(ev["target"]), json.dumps(ev["evidence"]), json.dumps(ev["data"])))
+
+
+def _run_rules(c, ev, ruleset, agent_id, tenant) -> int:
+    n = 0
+    for al in ruleengine.evaluate(ev, ruleset, agent_id, tenant):
+        if _alert_duplicate(c, al):
+            continue
+        _insert_alert(c, al)
+        n += 1
+    return n
+
+
+def _correlate_vulns(c, inv_ev, ruleset, agent_id, tenant, host):
+    """Cocokkan paket di event software_inventory dgn vuln DB -> event+alert CVE."""
+    from nexus_manager import vulndb
+    pkgs = (inv_ev.get("data") or {}).get("packages", [])
+    findings = vulndb.match(pkgs, get_vulndb())
+    n_ev = n_al = 0
+    for f in findings:
+        vev = schema.normalize_event({
+            "type": "vulnerability", "source": "vulndetect", "severity": f["severity"],
+            "event_type": "cve_match",
+            "title": f"{f['cve']}: {f['title']} — {f['package']} {f['installed']}",
+            "detail": f"Terpasang {f['installed']} < perbaikan {f['fixed']} (CVSS {f.get('cvss')}).",
+            "target": {"package": f["package"]},
+            "evidence": {"cve": f["cve"], "installed": f["installed"], "fixed": f["fixed"],
+                         "cvss": f.get("cvss")},
+            "origin": "real"})
+        vev = schema.enrich_event(vev, agent_id=agent_id, tenant_id=tenant, host=host)
+        _insert_event(c, vev, agent_id, tenant, host)
+        n_ev += 1
+        n_al += _run_rules(c, vev, ruleset, agent_id, tenant)
+    if findings:
+        log(f"[MANAGER] Vuln detection: {len(findings)} CVE cocok dari inventori {agent_id}")
+    return n_ev, n_al
+
+
+def get_vulndb() -> list:
+    from nexus_manager import vulndb
+    try:
+        return json.loads(_get_cfg("vuln_db") or "[]") or vulndb.DEFAULT_VULN_DB
+    except Exception:
+        return vulndb.DEFAULT_VULN_DB
+
+
+def set_vulndb(db_json, actor="admin") -> dict:
+    init_db()
+    try:
+        db = json.loads(db_json) if isinstance(db_json, str) else db_json
+        assert isinstance(db, list)
+    except Exception as e:
+        return {"ok": False, "error": f"vuln_db harus JSON array: {e}"}
+    _set_cfg("vuln_db", json.dumps(db))
+    _audit(actor, "vulndb:set", f"{len(db)} entri")
+    return {"ok": True, "count": len(db)}
 
 
 def _insert_alert(c, al):
@@ -476,6 +539,9 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/rules/sigma":
             r = import_sigma(body.get("sigma", body))
             return self._send(200 if r.get("ok") else 400, r)
+        if path == "/vulndb":
+            r = set_vulndb(body.get("vuln_db", body))
+            return self._send(200 if r.get("ok") else 400, r)
         return self._send(404, {"error": "endpoint tidak dikenal"})
 
     def do_GET(self):
@@ -514,6 +580,8 @@ class _Handler(BaseHTTPRequestHandler):
                 int(_q("min_level", "0")))["alerts"]})
         if path == "/rules":
             return self._send(200, {"rules": get_rules()})
+        if path == "/vulndb":
+            return self._send(200, {"vuln_db": get_vulndb()})
         if path == "/audit":
             return self._send(200, list_audit(int(_q("limit", "200"))))
         if path == "/report":
