@@ -1,0 +1,46 @@
+Nexus Fleet — Commercial / Proprietary License
+Copyright (c) 2026 chandafa (Nexus Security). All rights reserved.
+
+Ini BUKAN perangkat lunak open source. Hak cipta dilindungi. "Nexus" dan logo
+terkait adalah merek milik pemegang hak cipta.
+
+1. DEFINISI
+   "Perangkat Lunak" = paket nexus-fleet (agent, manager, cli, dashboard, license,
+   beserta kode sumber, biner, dan dokumentasinya).
+   "Lisensi" = token lisensi sah yang diterbitkan oleh Pemegang Hak (vendor).
+   "Tier FREE" = penggunaan tanpa Lisensi, dengan batasan yang diberlakukan
+   Perangkat Lunak (mis. jumlah agent & fitur terbatas).
+
+2. PEMBERIAN TERBATAS (FREE)
+   Pemegang Hak memberi Anda izin tidak-eksklusif, tidak-dapat-dipindahtangankan
+   untuk MENJALANKAN Perangkat Lunak dalam Tier FREE untuk keperluan internal/evaluasi.
+
+3. PENGGUNAAN BERBAYAR (PRO/ENTERPRISE)
+   Fitur di luar Tier FREE hanya boleh diaktifkan dengan Lisensi berbayar yang sah
+   dari Pemegang Hak. Memalsukan, memodifikasi, atau melewati (bypass) mekanisme
+   lisensi DILARANG.
+
+4. LARANGAN
+   Tanpa izin tertulis Pemegang Hak, Anda TIDAK boleh:
+   (a) menjual, menyewakan, men-sublisensikan, atau mendistribusikan ulang Perangkat Lunak;
+   (b) menawarkannya sebagai layanan (SaaS) kepada pihak ketiga;
+   (c) menghapus/mengubah pemberitahuan hak cipta atau mekanisme lisensi;
+   (d) merekayasa-balik untuk menghindari pembatasan lisensi.
+
+5. KEPEMILIKAN
+   Seluruh hak, kepemilikan, dan kepentingan atas Perangkat Lunak tetap pada
+   Pemegang Hak. Lisensi ini tidak mengalihkan kepemilikan.
+
+6. ETIKA & HUKUM
+   Perangkat Lunak hanya untuk pengujian keamanan yang SAH & berizin pada sistem
+   milik sendiri atau yang Anda diizinkan. Penyalahgunaan adalah tanggung jawab Anda.
+
+7. TANPA JAMINAN / BATAS TANGGUNG JAWAB
+   PERANGKAT LUNAK DISEDIAKAN "APA ADANYA" TANPA JAMINAN APA PUN. PEMEGANG HAK TIDAK
+   BERTANGGUNG JAWAB ATAS KERUGIAN APA PUN YANG TIMBUL DARI PENGGUNAANNYA.
+
+8. KONTAK LISENSI
+   Untuk membeli Lisensi PRO/ENTERPRISE: [isi email/WA Anda].
+
+Catatan: dokumen ini bukan nasihat hukum. Untuk penegakan kuat, konsultasikan dengan
+penasihat hukum/HAKI dan daftarkan Hak Cipta program komputer di DJKI.

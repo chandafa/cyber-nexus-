@@ -16,12 +16,12 @@ version = "1.0.1"
 description = "Nexus Fleet — agent/manager/cli/dashboard keamanan endpoint (ala-Wazuh, ringan, stdlib-only)"
 readme = "README.md"
 requires-python = ">=3.8"
-license = { text = "MIT" }
-authors = [{ name = "Nexus Security" }]
+license = { text = "Proprietary" }
+authors = [{ name = "chandafa (Nexus Security)" }]
 keywords = ["security", "soc", "edr", "agent", "manager", "monitoring", "wazuh", "fleet"]
 classifiers = [
   "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: MIT License",
+  "License :: Other/Proprietary License",
   "Operating System :: OS Independent",
   "Topic :: Security",
   "Environment :: Console",

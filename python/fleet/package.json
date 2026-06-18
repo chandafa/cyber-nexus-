@@ -3,7 +3,7 @@
   "version": "1.0.1",
   "description": "Nexus Fleet — agent/manager/cli/dashboard keamanan endpoint (ala-Wazuh, ringan). npm membungkus engine Python stdlib-only.",
   "keywords": ["security", "soc", "edr", "agent", "manager", "monitoring", "wazuh", "fleet", "cli"],
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "engines": { "node": ">=14" },
   "bin": {
     "nexus-manager": "bin/nexus-manager.js",
@@ -20,7 +20,8 @@
     "nexus_cli/",
     "nexus_dashboard/",
     "nexus_license/",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "postinstall": "node bin/_check-python.js"
