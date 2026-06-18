@@ -246,4 +246,11 @@ DEFAULT_RULES = [
         "recommendation": "Periksa sesi/cookie & kemungkinan manipulasi form/callback.",
         "response": ["notify"],
     },
+    {
+        "id": "NEXUS-PROC-001", "name": "Proses mencurigakan berjalan di endpoint",
+        "category": "process_activity", "level": 12, "mitre": ["T1059", "T1571"],
+        "conditions": {"event_type": "suspicious_process"},
+        "recommendation": "Isolasi host, hentikan proses, audit persistensi & jalur masuk.",
+        "response": ["notify", "create_incident"],
+    },
 ]

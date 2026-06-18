@@ -65,7 +65,8 @@ DEFAULT_POLICY = {
     "collect_interval": fc.COLLECT_INTERVAL,
     "collectors": ["system", "listening_ports", "logged_users", "disk",
                    "firewall", "failed_logins", "fim", "sca",
-                   "software_inventory", "webaudit", "logmonitor"],
+                   "software_inventory", "webaudit", "logmonitor",
+                   "processes", "network"],
     "risky_ports": [21, 23, 25, 135, 139, 445, 1433, 3306, 3389, 5900, 6379, 27017],
     # File Integrity Monitoring — path yang dipantau (hash baseline).
     "fim_paths": [],

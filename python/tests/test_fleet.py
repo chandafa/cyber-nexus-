@@ -260,6 +260,17 @@ def main():
     check("Log4Shell (CVE-2021-44228) terdeteksi",
           any(a["evidence"].get("cve") == "CVE-2021-44228" for a in vulns))
 
+    print("== 25d. Syscollector (proses/jaringan) + suspicious process ==")
+    from nexus_agent import collectors as C2
+    pe = C2.c_processes({})
+    check("process inventory (process_list)", any(e["event_type"] == "process_list" for e in pe))
+    ne = C2.c_network({})
+    check("network inventory", ne[0]["event_type"] == "network_inventory")
+    ingest([{"type": "processes", "severity": "high", "event_type": "suspicious_process",
+             "title": "mimikatz", "target": {"process": "mimikatz.exe"}, "origin": "real"}])
+    check("NEXUS-PROC-001 fired (suspicious process)",
+          any(a["rule_id"] == "NEXUS-PROC-001" for a in mgr.list_alerts(500)["alerts"]))
+
     print("== 26. Lisensi valid (enterprise) terverifikasi ==")
     ls = mgr.license_status()
     check("license valid", ls["valid"] and ls["tier"] == "enterprise")

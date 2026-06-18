@@ -38,6 +38,8 @@ CATEGORY_MAP = {
     "vulnerability": ("vulnerability_finding", "cve_match"),
     "log": ("log_activity", "log_event"),
     "webaudit": ("config_assessment", "web_config"),
+    "processes": ("process_activity", "process_list"),
+    "network": ("network_activity", "network_inventory"),
 }
 
 

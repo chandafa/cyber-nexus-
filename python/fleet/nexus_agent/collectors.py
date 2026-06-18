@@ -392,11 +392,56 @@ def decode_line(line, logtype):
     return fn(line)
 
 
+_SUSPICIOUS_PROC = ("mimikatz", "ncat", "netcat", "xmrig", "cryptominer", "masscan",
+                    "lazagne", "rubeus", "cobaltstrike", "metasploit", "meterpreter")
+
+
+def c_processes(policy):
+    """Inventori proses berjalan (Wazuh syscollector) + flag proses mencurigakan."""
+    sysname = platform.system()
+    procs = []
+    if sysname == "Windows":
+        out = _run(["tasklist", "/fo", "csv", "/nh"])
+        for line in out.splitlines():
+            cells = line.split('","')
+            if cells:
+                procs.append(cells[0].strip('"').strip())
+    else:
+        out = _run(["ps", "-eo", "comm"])
+        procs = [l.strip() for l in out.splitlines()[1:] if l.strip()]
+    procs = [p for p in procs if p]
+    events = [{"type": "processes", "severity": "info", "event_type": "process_list",
+               "title": f"{len(procs)} proses berjalan",
+               "detail": ", ".join(sorted(set(procs))[:20]),
+               "data": {"count": len(procs)}}]
+    for p in sorted({x for x in procs if any(s in x.lower() for s in _SUSPICIOUS_PROC)}):
+        events.append({"type": "processes", "severity": "high",
+                       "event_type": "suspicious_process",
+                       "title": f"Proses mencurigakan terdeteksi: {p}",
+                       "target": {"process": p}, "data": {}})
+    return events
+
+
+def c_network(policy):
+    """Inventori interface/alamat IP (Wazuh syscollector)."""
+    if platform.system() == "Windows":
+        out = _run(["ipconfig"])
+        ips = set(_re.findall(r"IPv4.*?:\s*([\d.]+)", out))
+    else:
+        out = _run(["ip", "-o", "addr"]) or _run(["ifconfig"])
+        ips = set(_re.findall(r"inet\s+(?:addr:)?([\d.]+)", out))
+    ips.discard("127.0.0.1")
+    return [{"type": "network", "severity": "info", "event_type": "network_inventory",
+             "title": f"{len(ips)} alamat IP pada host",
+             "detail": ", ".join(sorted(ips)) or "—", "data": {"ips": sorted(ips)}}]
+
+
 REGISTRY = {
     "system": c_system, "listening_ports": c_listening_ports,
     "logged_users": c_logged_users, "disk": c_disk,
     "firewall": c_firewall, "failed_logins": c_failed_logins,
     "software_inventory": c_software_inventory, "sca": c_sca, "webaudit": c_webaudit,
+    "processes": c_processes, "network": c_network,
 }
 
 # fim & logmonitor diproses di agent (butuh state: baseline/offset)
