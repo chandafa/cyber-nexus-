@@ -14,6 +14,7 @@ pub struct Db(pub Mutex<Connection>);
 impl Db {
     pub fn new(path: &std::path::Path) -> Result<Self, String> {
         let conn = Connection::open(path).map_err(|e| e.to_string())?;
+        let _ = conn.execute("PRAGMA journal_mode=WAL;", []);
         conn.execute_batch(schema::SCHEMA_SQL)
             .map_err(|e| e.to_string())?;
         Ok(Db(Mutex::new(conn)))

@@ -88,11 +88,14 @@ pub async fn start_nexus_listener(
                         println!("[Nexus Manager] Pendaftaran baru terdeteksi dari {}", peer);
                         tokio::spawn(async move {
                             let mut buf = [0; 512];
-                            if let Ok(n) = socket.read(&mut buf).await {
+                            if let Ok(Ok(n)) = tokio::time::timeout(
+                                std::time::Duration::from_secs(5),
+                                socket.read(&mut buf)
+                            ).await {
                                 let req = String::from_utf8_lossy(&buf[..n]);
                                 if req.contains("ENROLL") {
                                     // Generate key dummy (Wazuh client.keys style)
-                                    let agent_id = format!("{:03}", rand_id());
+                                    let agent_id = format!("{:04}", rand_id());
                                     let secret = uuid::Uuid::new_v4().to_string().replace("-", "");
                                     let resp = format!("OK ID:{} KEY:{}", agent_id, secret);
                                     socket.write_all(resp.as_bytes()).await.ok();
@@ -232,9 +235,7 @@ pub async fn start_nexus_listener(
 }
 
 fn rand_id() -> u32 {
-    use std::time::SystemTime;
-    let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
-    (now % 1000) as u32
+    (uuid::Uuid::new_v4().as_u128() % 10000) as u32
 }
 
 #[tauri::command]

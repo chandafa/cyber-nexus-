@@ -16,6 +16,8 @@ interface SystemStatus {
   os_name: string;
   os_version: string;
   kernel_version: string;
+  network_interfaces?: string[];
+  discovered_services?: any[];
 }
 
 interface SupervisorStatus {
@@ -304,6 +306,115 @@ export const SystemHealth: React.FC = () => {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Service & Asset Discovery */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Network Interfaces Card */}
+        <div className="nx-card p-5 space-y-4 lg:col-span-1">
+          <div className="flex justify-between items-center border-b border-nexus-hairline pb-2">
+            <h3 className="nx-section text-sm font-semibold text-nexus-text font-mono flex items-center gap-1.5">
+              <Ic.server className="h-4 w-4 text-cyan-400" /> Network Interfaces
+            </h3>
+            <span className="text-[10px] bg-cyan-950/40 text-cyan-300 border border-cyan-800 px-2 py-0.5 rounded font-mono font-semibold">
+              {(sysStatus?.network_interfaces?.length || 0)} detected
+            </span>
+          </div>
+          <div className="space-y-2 max-h-[220px] overflow-y-auto font-mono text-xs pr-1">
+            {sysStatus?.network_interfaces && sysStatus.network_interfaces.length > 0 ? (
+              sysStatus.network_interfaces.map((iface, i) => (
+                <div 
+                  key={i} 
+                  className="flex items-center justify-between p-2.5 bg-nexus-surface/60 border border-nexus-border/40 rounded-lg hover:border-nexus-accent/30 transition-all"
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                    <span className="text-nexus-text font-semibold">{iface}</span>
+                  </div>
+                  <span className="text-[10px] text-nexus-muted bg-nexus-panel px-1.5 py-0.5 rounded border border-nexus-border">
+                    UP
+                  </span>
+                </div>
+              ))
+            ) : (
+              <div className="p-4 text-center text-nexus-muted italic text-[11px]">
+                Tidak ada interface aktif terdeteksi
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Discovered Services (Docker) Card */}
+        <div className="nx-card p-5 space-y-4 lg:col-span-2">
+          <div className="flex justify-between items-center border-b border-nexus-hairline pb-2">
+            <h3 className="nx-section text-sm font-semibold text-nexus-text font-mono flex items-center gap-1.5">
+              <Ic.dashboard className="h-4 w-4 text-emerald-400" /> Discovered Services (Docker)
+            </h3>
+            <span className={`text-[10px] px-2 py-0.5 rounded border font-mono font-semibold ${
+              sysStatus?.discovered_services && sysStatus.discovered_services.length > 0
+                ? "bg-emerald-950/40 text-emerald-300 border-emerald-800"
+                : "bg-nexus-surface text-nexus-muted border-nexus-border"
+            }`}>
+              {(sysStatus?.discovered_services?.length || 0)} containers active
+            </span>
+          </div>
+          
+          <div className="max-h-[220px] overflow-y-auto pr-1 space-y-2 font-mono text-[11px] leading-normal text-nexus-muted">
+            {sysStatus?.discovered_services && sysStatus.discovered_services.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {sysStatus.discovered_services.map((svc: any, i) => {
+                  const name = svc.Names || "Unknown";
+                  const image = svc.Image || "Unknown";
+                  const ports = svc.Ports || "None";
+                  const state = svc.State || "unknown";
+                  const status = svc.Status || "";
+                  
+                  return (
+                    <div 
+                      key={i} 
+                      className="p-3 bg-nexus-surface/50 border border-nexus-border/40 rounded-xl flex flex-col justify-between hover:border-emerald-500/20 transition-all hover:bg-nexus-surface/80"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex justify-between items-start">
+                          <span className="text-nexus-text font-bold text-xs truncate max-w-[150px]">{name}</span>
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded border font-bold uppercase ${
+                            state === "running" 
+                              ? "bg-green-950/30 text-green-400 border-green-800/50" 
+                              : "bg-red-950/30 text-red-400 border-red-800/50"
+                          }`}>
+                            {state}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-nexus-muted truncate" title={image}>
+                          Image: <span className="text-nexus-text/80">{image}</span>
+                        </div>
+                      </div>
+                      
+                      <div className="mt-3 pt-2 border-t border-nexus-hairline/20 space-y-1 text-[10px]">
+                        {ports && ports !== "None" && (
+                          <div className="truncate text-cyan-400/90" title={ports}>
+                            Ports: {ports}
+                          </div>
+                        )}
+                        <div className="text-nexus-muted/70">
+                          {status}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center p-8 border border-dashed border-nexus-border/50 rounded-xl space-y-2 bg-nexus-surface/20">
+                <span className="text-lg">🐳</span>
+                <div className="text-center">
+                  <p className="text-nexus-text font-semibold mb-0.5">Tidak ada container Docker</p>
+                  <p className="text-[10px] text-nexus-muted mb-0">Aktifkan container Docker di host untuk menguji service discovery otomatis.</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Supervisor Event Logs */}

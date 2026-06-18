@@ -44,10 +44,12 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     }
 
-    builder
+    let app = builder
         .manage(ScanRegistry::default())
         .manage(SystemMonitorState {
             sys: Mutex::new(System::new_all()),
+            docker_services: Mutex::new(Vec::new()),
+            network_interfaces: Mutex::new(Vec::new()),
         })
         .manage(WafSupervisorState::default())
         .manage(EbpfState::default())
@@ -66,6 +68,28 @@ pub fn run() {
 
             // Jalankan Simulator eBPF untuk local development/mocking
             commands::ebpf::start_ebpf_simulator(app.handle().clone());
+
+            // Thread untuk memperbarui status Network Interfaces dan Docker secara berkala (Non-blocking)
+            let app_handle_for_discovery = app.handle().clone();
+            std::thread::spawn(move || {
+                loop {
+                    let interfaces = {
+                        let networks = sysinfo::Networks::new_with_refreshed_list();
+                        networks.iter().map(|(name, _)| name.clone()).collect::<Vec<String>>()
+                    };
+                    let docker_svcs = get_docker_services();
+
+                    if let Some(monitor) = app_handle_for_discovery.try_state::<SystemMonitorState>() {
+                        if let Ok(mut lock) = monitor.network_interfaces.lock() {
+                            *lock = interfaces;
+                        }
+                        if let Ok(mut lock) = monitor.docker_services.lock() {
+                            *lock = docker_svcs;
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(10));
+                }
+            });
 
             // Thread Watchdog Supervisor untuk memantau kesehatan modul WAF
             let app_handle = app.handle().clone();
@@ -112,6 +136,12 @@ pub fn run() {
                                 0.0
                             };
 
+                            let (docker_svcs, interfaces) = {
+                                let docker = monitor.docker_services.lock().unwrap().clone();
+                                let net = monitor.network_interfaces.lock().unwrap().clone();
+                                (docker, net)
+                            };
+
                             serde_json::json!({
                                 "cpu_usage": cpu_usage,
                                 "memory_usage": memory_usage,
@@ -124,6 +154,8 @@ pub fn run() {
                                 "os_name": os_name,
                                 "os_version": os_version,
                                 "kernel_version": kernel_version,
+                                "network_interfaces": interfaces,
+                                "discovered_services": docker_svcs,
                             })
                         };
 
@@ -308,6 +340,55 @@ pub fn run() {
             stop_nexus_listener,
             send_nexus_agent_command,
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("error saat menjalankan aplikasi Nexus");
+
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            // 1. Kill WAF and scanners in ScanRegistry
+            if let Some(registry) = app_handle.try_state::<ScanRegistry>() {
+                if let Ok(mut reg) = registry.0.lock() {
+                    for (scan_id, child_arc) in reg.iter() {
+                        if let Ok(mut child) = child_arc.lock() {
+                            println!("[Cleanup] Menghentikan subproses scan_id: {}", scan_id);
+                            let _ = child.kill();
+                        }
+                    }
+                    reg.clear();
+                }
+            }
+            // 2. Stop Nexus Listener
+            if let Some(state) = app_handle.try_state::<NexusAgentListenerState>() {
+                let _ = stop_nexus_listener(state, app_handle.clone());
+            }
+        }
+    });
+}
+
+fn get_docker_services() -> Vec<serde_json::Value> {
+    use std::process::Command;
+    let mut cmd = Command::new("docker");
+    cmd.args(&["ps", "--format", "{{json .}}"]);
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    let mut services = Vec::new();
+    if let Ok(output) = cmd.output() {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let trimmed = line.trim();
+                if !trimmed.is_empty() {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                        services.push(val);
+                    }
+                }
+            }
+        }
+    }
+    services
 }

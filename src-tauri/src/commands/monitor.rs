@@ -6,6 +6,8 @@ use serde_json::Value;
 
 pub struct SystemMonitorState {
     pub sys: Mutex<System>,
+    pub docker_services: Mutex<Vec<serde_json::Value>>,
+    pub network_interfaces: Mutex<Vec<String>>,
 }
 
 pub struct WafSupervisorState {
@@ -78,6 +80,12 @@ pub fn get_system_status(
         0.0
     };
 
+    let (docker_svcs, interfaces) = {
+        let docker = monitor.docker_services.lock().unwrap().clone();
+        let net = monitor.network_interfaces.lock().unwrap().clone();
+        (docker, net)
+    };
+
     Ok(serde_json::json!({
         "cpu_usage": cpu_usage,
         "memory_usage": memory_usage,
@@ -90,6 +98,8 @@ pub fn get_system_status(
         "os_name": os_name,
         "os_version": os_version,
         "kernel_version": kernel_version,
+        "network_interfaces": interfaces,
+        "discovered_services": docker_svcs,
     }))
 }
 

@@ -21,6 +21,7 @@ import ssl
 import os
 import sqlite3
 import shutil
+import queue
 from urllib.parse import urlsplit, unquote, parse_qs
 from typing import Optional
 
@@ -171,6 +172,10 @@ def _init_db():
     _init_local_vhosts_file()
     try:
         conn = sqlite3.connect(_DB_PATH)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL;")
+        except Exception:
+            pass
         cur = conn.cursor()
         cur.execute(
             """
@@ -970,6 +975,59 @@ def _resolve_country(ip: str, path: str = "") -> dict:
     return {"code": cc, "name": country_name}
 
 
+_LOG_QUEUE = queue.Queue(maxsize=10000)
+
+def _start_log_worker():
+    def worker():
+        while True:
+            try:
+                rec = _LOG_QUEUE.get()
+                if rec is None:
+                    break
+                
+                conn = sqlite3.connect(_DB_PATH)
+                cur = conn.cursor()
+                cur.execute('INSERT INTO events (ts, ip, rule, path, payload, headers, country_code, country_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                            (rec['ts'], rec['ip'], rec['rule'], rec['path'], rec['payload'], rec['headers'], rec['country_code'], rec['country_name']))
+                conn.commit()
+
+                # Enforce size capacity in MB
+                try:
+                    db_size_mb = os.path.getsize(_DB_PATH) / (1024 * 1024)
+                    if db_size_mb > _MAX_LOG_MB:
+                        cur.execute('SELECT COUNT(1) FROM events')
+                        cnt = cur.fetchone()[0]
+                        to_delete = max(1, int(cnt * 0.2))
+                        cur.execute('DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id ASC LIMIT ?)', (to_delete,))
+                        conn.commit()
+                        cur.execute('VACUUM')
+                        conn.commit()
+                except Exception as e:
+                    pass
+
+                # Enforce DB row capacity
+                try:
+                    cur.execute('SELECT COUNT(1) FROM events')
+                    cnt = cur.fetchone()[0]
+                    if cnt > _LOG_CAPACITY:
+                        to_delete = cnt - _LOG_CAPACITY
+                        cur.execute('DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id ASC LIMIT ?)', (to_delete,))
+                        conn.commit()
+                except Exception:
+                    pass
+                conn.close()
+                _LOG_QUEUE.task_done()
+            except Exception as e:
+                try:
+                    emit_line(f"[WAF] Log worker error: {e}")
+                except Exception:
+                    pass
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
+
+# Jalankan worker thread
+_start_log_worker()
+
 def log_event(ip: str, rule: str, path: str, payload: str, headers: str):
     ts = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
     geo = _resolve_country(ip, path)
@@ -987,39 +1045,12 @@ def log_event(ip: str, rule: str, path: str, payload: str, headers: str):
     if len(_IN_MEMORY_LOGS) > _LOG_CAPACITY:
         del _IN_MEMORY_LOGS[0: len(_IN_MEMORY_LOGS) - _LOG_CAPACITY]
     try:
-        conn = sqlite3.connect(_DB_PATH)
-        cur = conn.cursor()
-        cur.execute('INSERT INTO events (ts, ip, rule, path, payload, headers, country_code, country_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                    (ts, ip, rule, path, payload, headers, geo['code'], geo['name']))
-        conn.commit()
-
-        # Enforce size capacity in MB
+        _LOG_QUEUE.put_nowait(rec)
+    except queue.Full:
         try:
-            db_size_mb = os.path.getsize(_DB_PATH) / (1024 * 1024)
-            if db_size_mb > _MAX_LOG_MB:
-                cur.execute('SELECT COUNT(1) FROM events')
-                cnt = cur.fetchone()[0]
-                to_delete = max(1, int(cnt * 0.2))
-                cur.execute('DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id ASC LIMIT ?)', (to_delete,))
-                conn.commit()
-                cur.execute('VACUUM')
-                conn.commit()
-        except Exception as e:
-            emit_line(f"[WAF] Prune error: {e}")
-
-        # Enforce DB row capacity
-        try:
-            cur.execute('SELECT COUNT(1) FROM events')
-            cnt = cur.fetchone()[0]
-            if cnt > _LOG_CAPACITY:
-                to_delete = cnt - _LOG_CAPACITY
-                cur.execute('DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id ASC LIMIT ?)', (to_delete,))
-                conn.commit()
+            emit_line("[WAF] Log queue full, dropping event log to prevent backpressure")
         except Exception:
             pass
-        conn.close()
-    except Exception as e:
-        emit_line(f"[WAF] log insert error: {e}")
 
 
 def get_logs(limit: int = 200) -> dict:
@@ -1426,3 +1457,29 @@ def delete_custom_rule(name: str) -> dict:
         return {'status': 'ok'}
     except Exception as e:
         return {'status': 'error', 'error': str(e)}
+
+
+# Background memory cleanup for rate limiter IP buckets (stale IPs eviction)
+def _start_rate_limiter_cleanup():
+    def cleanup():
+        while True:
+            time.sleep(60)
+            try:
+                now = time.time()
+                # Copy keys list to prevent RuntimeError
+                keys = list(WAFHandler.ip_buckets.keys())
+                for ip in keys:
+                    bucket = WAFHandler.ip_buckets.get(ip)
+                    if bucket is not None:
+                        # Purge elements older than 300 seconds (TTL)
+                        while bucket and bucket[0] < now - 300:
+                            bucket.pop(0)
+                        if not bucket:
+                            WAFHandler.ip_buckets.pop(ip, None)
+            except Exception:
+                pass
+    t = threading.Thread(target=cleanup, daemon=True)
+    t.start()
+
+# Start the rate limiter eviction worker
+_start_rate_limiter_cleanup()
