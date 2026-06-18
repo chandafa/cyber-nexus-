@@ -59,3 +59,16 @@ def command(host, port, token, agent_id, cmd, args=None):
 
 def apply_license(host, port, token, license_token):
     return fc.post_admin(_url(host, port, "/license/apply"), {"token": license_token}, token)
+
+
+def remove_agent(host, port, token, agent_id, purge=False):
+    return fc.post_admin(_url(host, port, "/agents/remove"),
+                         {"agent_id": agent_id, "purge": purge}, token)
+
+
+def incidents(host, port, token, status="open"):
+    return fc.get_admin(_url(host, port, f"/incidents?status={status}"), token)
+
+
+def add_user(host, port, token, role="viewer"):
+    return fc.post_admin(_url(host, port, "/users"), {"role": role}, token)

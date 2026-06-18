@@ -316,6 +316,74 @@ def main():
           len(ep.get("webaudit_paths", [])) >= 1 and "webaudit" in ep.get("collectors", []))
     agt._set("watch_paths", "[]")
 
+    print("== 25h. Audit fixes #1,#2,#3,#6,#9,#10,#11 ==")
+    # #1 judul alert spesifik (judul event, bukan nama rule)
+    ingest([{"type": "webaudit", "severity": "high", "event_type": "weak_db_password",
+             "title": "DB_PASSWORD=root pada /srv/x/.env", "target": {"path": "/srv/x/.env"},
+             "origin": "real"}])
+    aw = [a for a in mgr.list_alerts(200)["alerts"] if a["rule_id"] == "NEXUS-WEB-003"]
+    check("#1 alert title spesifik (judul event)",
+          any("DB_PASSWORD=root" in a["title"] for a in aw))
+    # #2 word-boundary matching + skip-year
+    from nexus_manager import vulndb as VD2
+    check("#2 'git' tak cocok 'GitHub Desktop'", VD2._product_in("git", "github desktop") is False)
+    check("#2 'git' cocok 'Git for Windows'", VD2._product_in("git", "git for windows") is True)
+    check("#2 versi lewati tahun (14.34 dari 'VC++ 2015-2022 14.34')",
+          VD2._extract_version("microsoft visual c++ 2015-2022 14.34", "") == "14.34")
+    # #3 remove_agent membebaskan seat
+    c0 = mgr._conn(); did = fc.new_id("agt")
+    c0.execute("INSERT INTO agents(agent_id,agent_key,name,status,enrolled_at,last_seen) "
+               "VALUES(?,?,?,?,?,?)", (did, "k", "tmp", "active", fc.now(), 0))
+    c0.commit(); c0.close()
+    n_before = len(mgr.list_agents()["agents"])
+    check("#3 remove_agent ok & seat dibebaskan",
+          mgr.remove_agent(did).get("ok") and len(mgr.list_agents()["agents"]) == n_before - 1)
+    # #6 active-response: IP terlindungi ditolak
+    agt._active_response({"action": "block_ip", "ip": "127.0.0.1"})
+    lr = json.loads(agt._conn().execute("SELECT payload FROM queue ORDER BY id DESC LIMIT 1").fetchone()[0])
+    check("#6 IP terlindungi (127.0.0.1) ditolak",
+          lr["data"]["executed"] is False and "dilindungi" in str(lr["data"].get("reason", "")))
+    # #9 enkripsi at-rest (opsional)
+    os.environ["NEXUS_MASTER_KEY"] = "uji-master-key-123"
+    from nexus_common import cryptobox as CB
+    enc = CB.encrypt("rahasia123")
+    if CB.enabled():
+        check("#9 enkripsi at-rest (enc + dec)", enc.startswith("enc:") and CB.decrypt(enc) == "rahasia123")
+    else:
+        check("#9 cryptobox passthrough (lib crypto tak ada — opsional)", enc == "rahasia123")
+    os.environ.pop("NEXUS_MASTER_KEY", None)
+    # #10 RBAC: viewer
+    u = mgr.add_user("viewer")
+    check("#10 add_user viewer + role", u.get("ok") and mgr._role_of_token(u["token"]) == "viewer")
+    # #11 incidents grouping
+    inc = mgr.incidents()["incidents"]
+    check("#11 incidents dikelompokkan", isinstance(inc, list) and len(inc) >= 1)
+    # #5 replay window configurable + reset offset
+    fc.set_clock_offset(0)
+    check("#5 replay window dapat dikonfigurasi", mgr._replay_window() >= 60)
+    # nit: 403 untuk viewer (terautentikasi) menulis, 401 untuk token invalid
+    vtok = mgr.add_user("viewer")["token"]
+    try:
+        fc.post_admin(fc.manager_url("127.0.0.1", PORT, "/command"),
+                      {"agent_id": agent_id, "command": "ping"}, vtok)
+        check("viewer write -> 403", False)
+    except fc.HttpError as ex:
+        check("viewer write -> HTTP 403 (terautentikasi, tak berwenang)", ex.status == 403)
+    try:
+        fc.post_admin(fc.manager_url("127.0.0.1", PORT, "/command"),
+                      {"agent_id": agent_id, "command": "ping"}, "token-tak-valid")
+        check("token invalid -> 401", False)
+    except fc.HttpError as ex:
+        check("token invalid -> HTTP 401", ex.status == 401)
+    # HA: WAL mode
+    check("WAL mode aktif (langkah HA)",
+          mgr._conn().execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal")
+    # CVE: version range (introduced..fixed)
+    check("CVE range: log4j 1.2.17 di bawah introduced -> TIDAK cocok",
+          not any(x["cve"] == "CVE-2021-44228" for x in VD2.match([{"name": "log4j", "version": "1.2.17"}])))
+    check("CVE range: log4j 2.14.0 dalam rentang -> cocok",
+          any(x["cve"] == "CVE-2021-44228" for x in VD2.match([{"name": "log4j", "version": "2.14.0"}])))
+
     print("== 26. Lisensi valid (enterprise) terverifikasi ==")
     ls = mgr.license_status()
     check("license valid", ls["valid"] and ls["tier"] == "enterprise")
@@ -328,6 +396,12 @@ def main():
     check("free tier active", lf["tier"] == "free" and not lf["valid"])
     check("free max_agents=2", lf["max_agents"] == 2)
     check("sigma blocked on free", mgr.import_sigma(json.dumps(sigma)).get("ok") is False)
+    try:    # #4 fitur terkunci -> HTTP 403 (bukan 400)
+        fc.post_admin(fc.manager_url("127.0.0.1", PORT, "/response/actions"),
+                      {"agent_id": agent_id, "action": "block_ip", "ip": "1.2.3.4"}, admin_token)
+        check("#4 license-gated -> HTTP 403", False)
+    except fc.HttpError as ex:
+        check("#4 license-gated -> HTTP 403 (bukan 400)", ex.status == 403)
     check("active_response blocked on free",
           mgr.response_action(agent_id, "block_ip", ip="1.1.1.1").get("ok") is False)
     # rule premium (FIM .env) tidak menghasilkan alert di free

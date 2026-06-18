@@ -19,8 +19,8 @@ DEFAULT_VULN_DB = [
      "cvss": 7.5, "mitre": ["T1190"], "title": "OpenSSL X.509 buffer overflow (punycode)"},
     {"product": "openssh", "fixed": "9.3", "cve": "CVE-2023-38408", "severity": "high",
      "cvss": 9.8, "mitre": ["T1210"], "title": "OpenSSH ssh-agent RCE (PKCS#11)"},
-    {"product": "log4j", "fixed": "2.17.1", "cve": "CVE-2021-44228", "severity": "critical",
-     "cvss": 10.0, "mitre": ["T1190"], "title": "Log4Shell — Log4j JNDI RCE"},
+    {"product": "log4j", "introduced": "2.0", "fixed": "2.17.1", "cve": "CVE-2021-44228",
+     "severity": "critical", "cvss": 10.0, "mitre": ["T1190"], "title": "Log4Shell — Log4j JNDI RCE"},
     {"product": "sudo", "fixed": "1.9.5", "cve": "CVE-2021-3156", "severity": "high",
      "cvss": 7.8, "mitre": ["T1068"], "title": "Sudo Baron Samedit heap overflow (LPE)"},
     {"product": "nginx", "fixed": "1.21.0", "cve": "CVE-2021-23017", "severity": "high",
@@ -48,15 +48,29 @@ DEFAULT_VULN_DB = [
 ]
 
 import re as _re
-_VER_RE = _re.compile(r"(\d+(?:\.\d+){1,3})")
+# Versi = angka dgn MINIMAL satu titik (mis. 1.1.1, 14.34) -> tahun polos (2015) terabaikan.
+_VER_RE = _re.compile(r"\d+(?:\.\d+){1,3}")
+_YEAR_RE = _re.compile(r"^(?:19|20)\d{2}$")
 
 
 def _extract_version(name, version):
-    """Ambil versi dari field version; bila kosong/aneh, urai dari nama (DisplayName Windows)."""
+    """Ambil versi dari field version; bila kosong, urai dari nama — lewati tahun."""
     if version and any(ch.isdigit() for ch in str(version)):
         return str(version)
-    m = _VER_RE.search(str(name or ""))
-    return m.group(1) if m else ""
+    for m in _VER_RE.finditer(str(name or "")):
+        tok = m.group(0)
+        if _YEAR_RE.match(tok.split(".")[0]):     # token diawali tahun -> bukan versi
+            continue
+        return tok
+    return ""
+
+
+def _product_in(product, name):
+    """Cocok produk sebagai KATA UTUH (anti false-positive: 'git' tak cocok 'GitHub')."""
+    try:
+        return _re.search(r"(?<![a-z0-9])" + _re.escape(product) + r"(?![a-z0-9])", name) is not None
+    except Exception:
+        return product in name
 
 
 def _parse_ver(v):
@@ -87,15 +101,22 @@ def match(packages, db=None):
         if not name or not ver:
             continue
         for entry in db:
-            if entry["product"] in name and _vless(ver, entry["fixed"]):
-                key = (name, entry["cve"])
-                if key in seen:
-                    continue
-                seen.add(key)
-                findings.append({
-                    "package": pkg.get("name"), "installed": ver,
-                    "fixed": entry["fixed"], "cve": entry["cve"],
-                    "severity": entry["severity"], "cvss": entry.get("cvss"),
-                    "mitre": entry.get("mitre", []), "title": entry["title"],
-                })
+            if not _product_in(entry["product"], name):
+                continue
+            # rentan = versi < fixed DAN (bila ada batas bawah) versi >= introduced.
+            if not _vless(ver, entry["fixed"]):
+                continue
+            intro = entry.get("introduced")
+            if intro and _vless(ver, intro):     # lebih lama dari rentang terdampak
+                continue
+            key = (name, entry["cve"])
+            if key in seen:
+                continue
+            seen.add(key)
+            findings.append({
+                "package": pkg.get("name"), "installed": ver,
+                "fixed": entry["fixed"], "cve": entry["cve"],
+                "severity": entry["severity"], "cvss": entry.get("cvss"),
+                "mitre": entry.get("mitre", []), "title": entry["title"],
+            })
     return findings

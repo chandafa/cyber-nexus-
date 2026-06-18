@@ -26,5 +26,6 @@ from nexus_manager.server import (  # noqa: E402,F401
     get_enroll_key, get_admin_token, init_db,
     list_alerts, ack_alert, get_rules, set_rules, list_audit, report,
     posture, import_sigma, response_action, license_status, reload_license,
-    get_vulndb, set_vulndb, set_notify, apply_license,
+    get_vulndb, set_vulndb, set_notify, apply_license, remove_agent,
+    incidents, add_user, list_users,
 )

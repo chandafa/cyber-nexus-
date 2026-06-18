@@ -143,8 +143,11 @@ def make_alert(agent_id, rule, event, tenant_id="default", ts=None):
         "tenant_id": tenant_id,
         "level": level,
         "severity": level_to_severity(level),
-        "title": rule.get("name", event.get("title", "Alert")),
-        "description": rule.get("description", event.get("detail", "")),
+        # Judul spesifik: pakai judul EVENT (mis. "CVE-xxxx: paket versi", "Port 445
+        # (SMB)", "Proses mencurigakan: mimikatz") agar bisa di-triage; nama rule
+        # tetap tersimpan di field rule.name.
+        "title": event.get("title") or rule.get("name", "Alert"),
+        "description": rule.get("name", "") or rule.get("description", event.get("detail", "")),
         "category": event.get("category", ""),
         "event_type": event.get("event_type", ""),
         "event_ref": event.get("event_id", ""),

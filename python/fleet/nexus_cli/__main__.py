@@ -54,6 +54,12 @@ def main(argv=None):
     cm.add_argument("--args", default="")
     apl = sub.add_parser("apply-license", help="pasang lisensi ke manager (hot-reload)")
     apl.add_argument("--file"); apl.add_argument("--token", dest="lic")
+    rma = sub.add_parser("remove-agent", help="hapus pendaftaran agent (bebaskan seat)")
+    rma.add_argument("--agent", required=True); rma.add_argument("--purge", action="store_true")
+    inc = sub.add_parser("incidents", help="alert dikelompokkan jadi insiden")
+    inc.add_argument("--status", default="open")
+    au = sub.add_parser("add-user", help="buat token RBAC (admin|viewer)")
+    au.add_argument("--role", default="viewer", choices=["admin", "viewer"])
     args = p.parse_args(argv)
 
     # Konfigurasi TLS untuk transport admin (Fix: TLS untuk CLI/dashboard).
@@ -100,6 +106,12 @@ def main(argv=None):
                 with open(args.file, encoding="utf-8") as f:
                     lic = f.read().strip()
             out = admin.apply_license(args.host, args.port, args.token, lic)
+        elif args.action == "remove-agent":
+            out = admin.remove_agent(args.host, args.port, args.token, args.agent, args.purge)
+        elif args.action == "incidents":
+            out = admin.incidents(args.host, args.port, args.token, args.status)
+        elif args.action == "add-user":
+            out = admin.add_user(args.host, args.port, args.token, args.role)
         else:
             raise SystemExit(f"aksi tidak dikenal: {args.action}")
     except fc.HttpError as e:
