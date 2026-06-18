@@ -319,8 +319,13 @@ class TestWAF(unittest.TestCase):
             self.assertEqual(body.get("status"), "backend_ok")
 
         # Verify WAF logged the real client IP (203.0.113.195) instead of 127.0.0.1
-        logs_res = waf.get_logs()
-        logs_list = logs_res.get('logs', [])
+        logs_list = []
+        for _ in range(10):
+            logs_res = waf.get_logs()
+            logs_list = logs_res.get('logs', [])
+            if logs_list:
+                break
+            time.sleep(0.1)
         self.assertGreater(len(logs_list), 0)
         logged_ip = logs_list[0].get('ip')
         self.assertEqual(logged_ip, '203.0.113.195')

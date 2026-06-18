@@ -560,6 +560,7 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
         max_rps = config['max_rps']
         learning_mode = config['learning_mode']
         allowlist_ips = config['allowlist_ips']
+        allowlist_paths = config['allowlist_paths']
         enabled_rules_list = config['rules']
 
         # Check IP blacklist

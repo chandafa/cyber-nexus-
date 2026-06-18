@@ -52,3 +52,5 @@ vendor_private.key
 *.license
 .nexus/
 # (vendor_public.key SENGAJA tidak diabaikan — itu publik & wajib ikut paket)
+
+cyber_nexus*
