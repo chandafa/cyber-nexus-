@@ -132,7 +132,16 @@ def c_firewall(policy):
 
 def c_failed_logins(policy):
     if platform.system() == "Windows":
-        return []
+        # Event 4625 = logon gagal (RDP/SMB/lokal). Butuh izin baca Security log.
+        out = _run(["wevtutil", "qe", "Security", "/q:*[System[(EventID=4625)]]",
+                    "/c:200", "/rd:true", "/f:xml"], timeout=12)
+        count = out.count("</Event>")
+        if count == 0:
+            return []
+        sev = "high" if count >= 50 else "medium" if count >= 10 else "low"
+        return [{"type": "failed_logins", "severity": sev,
+                 "title": f"{count} login Windows gagal (Event 4625, terbaru)",
+                 "detail": "Potensi brute-force RDP/SMB/lokal.", "data": {"count": count}}]
     count = 0
     for path in ("/var/log/auth.log", "/var/log/secure"):
         if os.path.exists(path):

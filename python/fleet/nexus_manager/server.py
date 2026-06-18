@@ -26,6 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from nexus_common import protocol as fc
 from nexus_common import schema
 from nexus_common import license as licensing
+from nexus_common import cryptobox
 from nexus_common.log import log
 from nexus_manager import rules as ruleengine
 
@@ -96,8 +97,10 @@ DEFAULT_POLICY = {
     # Log Monitoring — berkas log yang dipantau. Item: path atau {path,type}.
     # type: laravel|nginx|auth|generic (auto-deteksi bila kosong).
     "log_paths": [],
-    # Active Response: false = DRY-RUN (hanya log), true = eksekusi blokir nyata.
-    "active_response": False,
+    # Active Response: false = DRY-RUN. Granular & aman by default:
+    "active_response": False,                 # sakelar utama eksekusi nyata
+    "ar_allowed_actions": [],                 # aksi yang BOLEH dieksekusi (kosong=tak ada)
+    "ar_protected_ips": ["127.0.0.1"],        # IP yang TAK BOLEH diblokir (anti tembak-kaki)
     "min_report_severity": "info",
 }
 
@@ -179,17 +182,25 @@ def _migrate(c):
             pass
 
 
+# Nilai rahasia di config dienkripsi at-rest bila NEXUS_MASTER_KEY diset (item #9).
+_SECRET_KEYS = {"enroll_key", "admin_token", "license_token"}
+
+
 def _get_cfg(key, default=None):
     c = _conn()
     row = c.execute("SELECT value FROM config WHERE key=?", (key,)).fetchone()
     c.close()
-    return row["value"] if row else default
+    if not row:
+        return default
+    val = row["value"]
+    return cryptobox.decrypt(val) if key in _SECRET_KEYS else val
 
 
 def _set_cfg(key, value):
+    stored = cryptobox.encrypt(str(value)) if key in _SECRET_KEYS else str(value)
     c = _conn()
     c.execute("INSERT INTO config(key,value) VALUES(?,?) "
-              "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, str(value)))
+              "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, stored))
     c.commit()
     c.close()
 
@@ -214,6 +225,48 @@ def _ensure_config():
     if _get_cfg("notify_webhook") is None:
         _set_cfg("notify_webhook", "")
         _set_cfg("notify_min_level", "12")  # default: alert high/critical -> webhook
+    if _get_cfg("replay_window") is None:
+        _set_cfg("replay_window", str(fc.REPLAY_WINDOW))  # toleransi clock-skew (detik)
+    if _get_cfg("api_users") is None:
+        _set_cfg("api_users", "{}")          # RBAC: {token: role(admin|viewer)}
+
+
+def _api_users() -> dict:
+    try:
+        return json.loads(_get_cfg("api_users") or "{}") or {}
+    except Exception:
+        return {}
+
+
+def _role_of_token(token) -> str:
+    """admin (bootstrap admin_token atau user admin) / viewer / None."""
+    if token and token == (_get_cfg("admin_token") or ""):
+        return "admin"
+    return _api_users().get(token)
+
+
+def add_user(role="viewer", actor="admin") -> dict:
+    if role not in ("admin", "viewer"):
+        return {"ok": False, "error": "role harus admin|viewer"}
+    users = _api_users()
+    tok = fc.gen_key()
+    users[tok] = role
+    _set_cfg("api_users", json.dumps(users))
+    _audit(actor, "user:add", role)
+    return {"ok": True, "token": tok, "role": role}
+
+
+def list_users() -> dict:
+    users = _api_users()
+    masked = [{"token_prefix": t[:8] + "…", "role": r} for t, r in users.items()]
+    return {"ok": True, "users": masked, "count": len(masked)}
+
+
+def _replay_window() -> int:
+    try:
+        return int(_get_cfg("replay_window") or fc.REPLAY_WINDOW)
+    except Exception:
+        return fc.REPLAY_WINDOW
 
 
 def _audit(actor, action, detail=""):
@@ -546,8 +599,14 @@ class _Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length", 0) or 0)
         return self.rfile.read(n) if n else b""
 
-    def _admin_ok(self):
-        return self.headers.get("X-Admin-Token", "") == (_get_cfg("admin_token") or "")
+    def _role(self):
+        return _role_of_token(self.headers.get("X-Admin-Token", ""))
+
+    def _admin_ok(self):            # tulis: hanya admin
+        return self._role() == "admin"
+
+    def _can_read(self):            # baca: admin atau viewer (RBAC)
+        return self._role() in ("admin", "viewer")
 
     def _path(self):
         p = self.path.split("?", 1)[0]
@@ -570,7 +629,7 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(400, {"error": "JSON tidak valid"})
         # Anti-replay: tolak pesan agent yang stempel waktunya basi.
         if path in ("/enroll", "/agents/enroll", "/heartbeat", "/agents/heartbeat",
-                    "/events", "/events/batch") and not fc.fresh(body):
+                    "/events", "/events/batch") and not fc.fresh(body, _replay_window()):
             return self._send(401, {"error": "pesan kedaluwarsa / replay ditolak"})
         if path in ("/enroll", "/agents/enroll"):
             return self._send(*_enroll(body, raw, self.headers.get("X-Enroll-Signature", "")))
@@ -596,19 +655,25 @@ class _Handler(BaseHTTPRequestHandler):
             r = response_action(body.get("agent_id", ""), body.get("action", ""),
                                 body.get("ip", ""), body.get("target", ""),
                                 body.get("process", ""))
-            return self._send(200 if r.get("ok") else 400, r)
+            return self._send(_status_for(r), r)
         if path == "/notify":
             r = set_notify(body.get("webhook", ""), body.get("min_level", 12))
             return self._send(200, r)
         if path == "/license/apply":
             r = apply_license(body.get("token", ""))
             return self._send(200 if r.get("ok") else 400, r)
+        if path == "/agents/remove":
+            r = remove_agent(body.get("agent_id", ""), bool(body.get("purge", False)))
+            return self._send(200 if r.get("ok") else 404, r)
+        if path == "/users":
+            r = add_user(body.get("role", "viewer"))
+            return self._send(200 if r.get("ok") else 400, r)
         if path == "/rules":
             r = set_rules(body.get("rules", []))
             return self._send(200 if r.get("ok") else 400, r)
         if path == "/rules/sigma":
             r = import_sigma(body.get("sigma", body))
-            return self._send(200 if r.get("ok") else 400, r)
+            return self._send(_status_for(r), r)
         if path == "/vulndb":
             r = set_vulndb(body.get("vuln_db", body))
             return self._send(200 if r.get("ok") else 400, r)
@@ -630,8 +695,8 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, {"policy": _policy(), "policy_version": _policy_version()})
         if path == "/license":
             return self._send(200, license_status())
-        if not self._admin_ok():
-            return self._send(401, {"error": "admin token diperlukan"})
+        if not self._can_read():          # RBAC: admin atau viewer boleh baca
+            return self._send(401, {"error": "token admin/viewer diperlukan"})
 
         def _q(name, default):
             if "?" not in self.path:
@@ -648,6 +713,12 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, {"alerts": list_alerts(
                 int(_q("limit", "200")), _q("status", ""), _q("severity", ""),
                 int(_q("min_level", "0")))["alerts"]})
+        if path == "/incidents":
+            return self._send(200, incidents(_q("status", "open")))
+        if path == "/users":
+            if self._role() != "admin":
+                return self._send(403, {"error": "hanya admin"})
+            return self._send(200, list_users())
         if path == "/rules":
             return self._send(200, {"rules": get_rules()})
         if path == "/vulndb":
@@ -659,6 +730,13 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/stats":
             return self._send(200, stats())
         return self._send(404, {"error": "endpoint tidak dikenal"})
+
+
+def _status_for(r) -> int:
+    """200 sukses · 403 bila terkunci lisensi (ada 'feature') · 400 lainnya."""
+    if r.get("ok"):
+        return 200
+    return 403 if r.get("feature") else 400
 
 
 def _set_policy_api(body):
@@ -721,6 +799,24 @@ def list_events(limit=200, agent_id="", severity="") -> dict:
     return {"module": "fleet_manager", "events": events}
 
 
+def remove_agent(agent_id, purge=False, actor="admin") -> dict:
+    """Hapus pendaftaran agent (membebaskan seat lisensi). purge=True hapus juga event/alert-nya."""
+    init_db()
+    if not agent_id:
+        return {"module": "fleet_manager", "ok": False, "error": "agent_id wajib"}
+    c = _conn()
+    n = c.execute("DELETE FROM agents WHERE agent_id=?", (agent_id,)).rowcount
+    c.execute("DELETE FROM commands WHERE agent_id=?", (agent_id,))
+    if purge:
+        c.execute("DELETE FROM events WHERE agent_id=?", (agent_id,))
+        c.execute("DELETE FROM alerts WHERE agent_id=?", (agent_id,))
+    c.commit(); c.close()
+    if n:
+        _audit(actor, "agent:remove", agent_id + (" (+purge)" if purge else ""))
+        log(f"[MANAGER] Agent dihapus: {agent_id} — seat dibebaskan.")
+    return {"module": "fleet_manager", "ok": n > 0, "removed": n}
+
+
 def list_alerts(limit=200, status="", severity="", min_level=0) -> dict:
     init_db()
     c = _conn()
@@ -747,6 +843,22 @@ def list_alerts(limit=200, status="", severity="", min_level=0) -> dict:
         "status": r["status"], "origin": r["origin"], "event_ref": r["event_ref"],
     } for r in rows]
     return {"module": "fleet_manager", "alerts": alerts}
+
+
+def incidents(status="open") -> dict:
+    """Kelompokkan alert (per agent+rule) jadi insiden -> kurangi alert fatigue (item #11)."""
+    init_db()
+    c = _conn()
+    rows = c.execute(
+        "SELECT agent_id, rule_id, rule_name, MAX(level) lvl, COUNT(*) cnt, "
+        "MIN(ts) first_ts, MAX(ts) last_ts FROM alerts WHERE status=? "
+        "GROUP BY agent_id, rule_id ORDER BY lvl DESC, cnt DESC", (status,)).fetchall()
+    c.close()
+    inc = [{"agent_id": r["agent_id"], "rule_id": r["rule_id"], "rule_name": r["rule_name"],
+            "level": r["lvl"], "severity": schema.level_to_severity(r["lvl"] or 0),
+            "count": r["cnt"], "first_iso": fc.iso(r["first_ts"]),
+            "last_iso": fc.iso(r["last_ts"])} for r in rows]
+    return {"module": "fleet_manager", "incidents": inc, "total": len(inc)}
 
 
 def ack_alert(alert_id, status="ack", actor="admin") -> dict:
@@ -995,6 +1107,8 @@ def _banner(host, port):
     else:
         log(f"[MANAGER] Lisensi        : FREE (terbatas {licensing.FREE_MAX_AGENTS} agent, "
             f"fitur dasar). Pasang NEXUS_LICENSE untuk membuka Pro.")
+    if cryptobox.enabled():
+        log("[MANAGER] Enkripsi at-rest : AKTIF (NEXUS_MASTER_KEY).")
     log("[MANAGER] Bagikan host:port + enrollment key ke endpoint untuk mendaftarkan agent.")
 
 

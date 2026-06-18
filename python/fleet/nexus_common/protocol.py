@@ -166,6 +166,22 @@ def _request(method: str, url: str, raw: bytes = b"", headers=None, timeout=15) 
         raise HttpError(e.code, body)
 
 
+_CLOCK_OFFSET = 0   # detik: (waktu server - waktu lokal); koreksi clock-skew agent
+
+
+def set_clock_offset(seconds: int):
+    """Sinkronkan stempel waktu agent dgn server (anti-replay tahan clock drift)."""
+    global _CLOCK_OFFSET
+    try:
+        _CLOCK_OFFSET = int(seconds)
+    except Exception:
+        _CLOCK_OFFSET = 0
+
+
+def _stamped(body: dict) -> bytes:
+    return canonical({**body, "_ts": now() + _CLOCK_OFFSET})
+
+
 def fresh(body: dict, window: int = REPLAY_WINDOW) -> bool:
     """True bila stempel waktu `_ts` di body masih dalam jendela (anti-replay)."""
     try:
@@ -175,7 +191,7 @@ def fresh(body: dict, window: int = REPLAY_WINDOW) -> bool:
 
 
 def post_signed(url: str, body: dict, agent_id: str, agent_key: str, timeout=15) -> dict:
-    raw = canonical({**body, "_ts": now()})       # stempel waktu (anti-replay)
+    raw = _stamped(body)                           # stempel waktu ter-koreksi (anti-replay)
     return _request("POST", url, raw, {
         "X-Agent-Id": agent_id,
         "X-Signature": sign(agent_key, raw),
@@ -183,7 +199,7 @@ def post_signed(url: str, body: dict, agent_id: str, agent_key: str, timeout=15)
 
 
 def post_enroll(url: str, body: dict, enroll_key: str, timeout=15) -> dict:
-    raw = canonical({**body, "_ts": now()})
+    raw = _stamped(body)
     return _request("POST", url, raw, {"X-Enroll-Signature": sign(enroll_key, raw)}, timeout)
 
 

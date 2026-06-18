@@ -385,6 +385,19 @@ def dispatch(command: str, kwargs: dict) -> dict:
         from modules import fleet_manager
         return fleet_manager.apply_license(kwargs.get('token', ''))
 
+    if command == 'fleet_remove_agent':
+        from modules import fleet_manager
+        return fleet_manager.remove_agent(kwargs.get('agent_id', ''),
+                                          str(kwargs.get('purge', '')).lower() in ('1', 'true', 'yes'))
+
+    if command == 'fleet_incidents':
+        from modules import fleet_manager
+        return fleet_manager.incidents(kwargs.get('status', 'open'))
+
+    if command == 'fleet_add_user':
+        from modules import fleet_manager
+        return fleet_manager.add_user(kwargs.get('role', 'viewer'))
+
     if command == 'fleet_vulndb_get':
         from modules import fleet_manager
         return {'module': 'fleet_manager', 'vuln_db': fleet_manager.get_vulndb()}

@@ -3,6 +3,23 @@
 All notable changes to **Nexus Fleet** (`nexus-fleet`) are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.8] — 2026-06
+### Fixed / Improved (from real-usage audit)
+- **Specific alert titles** — alerts now show the event's specific finding (CVE/port/process), not
+  just the rule name.
+- **More accurate Vulnerability Detection** — word-boundary product matching (no "git"↔"GitHub"
+  false positives) and version parsing that ignores year tokens.
+- **Agent removal** — `nexus-cli remove-agent --agent <id>` deregisters an agent and frees its seat.
+- **Correct HTTP status** — license-gated features return **403** (was 400).
+- **Clock-skew tolerance** — agents sync time from the server; replay window is configurable.
+- **Granular Active Response** — per-action allowlist + protected-IP list (won't block yourself).
+- **Windows failed-login detection** — reads Security Event Log (Event 4625).
+- **Dashboard** — admin token stored in `sessionStorage` (not `localStorage`).
+- **Optional at-rest encryption** — secrets encrypted with `NEXUS_MASTER_KEY` (`pip install
+  nexus-fleet[crypto]`).
+- **RBAC** — multiple API tokens with `admin`/`viewer` roles (`nexus-cli add-user`).
+- **Incident grouping** — `nexus-cli incidents` groups alerts to reduce fatigue.
+
 ## [1.0.7] — 2026-06
 ### Fixed / Improved
 - **License hot-reload** — apply a license to a running manager without restart

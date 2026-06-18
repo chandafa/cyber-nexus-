@@ -48,15 +48,29 @@ DEFAULT_VULN_DB = [
 ]
 
 import re as _re
-_VER_RE = _re.compile(r"(\d+(?:\.\d+){1,3})")
+# Versi = angka dgn MINIMAL satu titik (mis. 1.1.1, 14.34) -> tahun polos (2015) terabaikan.
+_VER_RE = _re.compile(r"\d+(?:\.\d+){1,3}")
+_YEAR_RE = _re.compile(r"^(?:19|20)\d{2}$")
 
 
 def _extract_version(name, version):
-    """Ambil versi dari field version; bila kosong/aneh, urai dari nama (DisplayName Windows)."""
+    """Ambil versi dari field version; bila kosong, urai dari nama — lewati tahun."""
     if version and any(ch.isdigit() for ch in str(version)):
         return str(version)
-    m = _VER_RE.search(str(name or ""))
-    return m.group(1) if m else ""
+    for m in _VER_RE.finditer(str(name or "")):
+        tok = m.group(0)
+        if _YEAR_RE.match(tok.split(".")[0]):     # token diawali tahun -> bukan versi
+            continue
+        return tok
+    return ""
+
+
+def _product_in(product, name):
+    """Cocok produk sebagai KATA UTUH (anti false-positive: 'git' tak cocok 'GitHub')."""
+    try:
+        return _re.search(r"(?<![a-z0-9])" + _re.escape(product) + r"(?![a-z0-9])", name) is not None
+    except Exception:
+        return product in name
 
 
 def _parse_ver(v):
@@ -87,7 +101,7 @@ def match(packages, db=None):
         if not name or not ver:
             continue
         for entry in db:
-            if entry["product"] in name and _vless(ver, entry["fixed"]):
+            if _product_in(entry["product"], name) and _vless(ver, entry["fixed"]):
                 key = (name, entry["cve"])
                 if key in seen:
                     continue

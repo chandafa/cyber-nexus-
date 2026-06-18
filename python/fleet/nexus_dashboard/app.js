@@ -181,7 +181,9 @@ function connect() {
   // persist
   localStorage.setItem("nx_host", $("host").value);
   localStorage.setItem("nx_port", $("port").value);
-  localStorage.setItem("nx_token", $("token").value);
+  // Admin token disimpan di sessionStorage (terhapus saat tab ditutup) — kurangi
+  // paparan bila ada XSS, dan tak persist seperti localStorage.
+  sessionStorage.setItem("nx_token", $("token").value);
   refresh();
   timer = setInterval(refresh, 4000);
 }
@@ -189,7 +191,7 @@ function connect() {
 window.addEventListener("DOMContentLoaded", () => {
   $("host").value = localStorage.getItem("nx_host") || $("host").value;
   $("port").value = localStorage.getItem("nx_port") || $("port").value;
-  $("token").value = localStorage.getItem("nx_token") || "";
+  $("token").value = sessionStorage.getItem("nx_token") || "";
   $("connect").addEventListener("click", connect);
   $("refresh").addEventListener("click", refresh);
   $("sev").addEventListener("change", refresh);
