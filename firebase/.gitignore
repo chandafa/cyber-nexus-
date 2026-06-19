@@ -1,0 +1,10 @@
+# JANGAN pernah commit kredensial/secret
+serviceAccount.json
+*serviceAccount*.json
+*.serviceaccount.json
+.env
+.env.*
+functions/venv/
+functions/__pycache__/
+admin/__pycache__/
+*.local

@@ -1,3 +1,9 @@
+// NEXUS — Copyright (c) 2026 chandafa (Nexus Security). All rights reserved.
+// Part of the Nexus security platform. Proprietary and confidential.
+// Unauthorized copying, modification, or distribution is prohibited.
+// This notice and embedded metadata must not be removed. See LICENSE / NOTICE.
+// Contact: ck271138@gmail.com
+
 // src/components/Layout.tsx — layout utama tiga-panel (SDD bagian 9.1).
 import React, { useEffect } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
@@ -5,12 +11,15 @@ import { Sidebar } from "./Sidebar";
 import { InstallModal } from "./InstallModal";
 import { ToastHost } from "./Toast";
 import { useSettingsStore } from "../app/store/settings.store";
+import { useLicenseStore } from "../app/store/license.store";
 import { isTauri } from "../lib/tauri";
 
 export const Layout: React.FC = () => {
   const navigate = useNavigate();
   const { loadSettings, loaded, onboardingComplete, refreshWsl, refreshDeps } =
     useSettingsStore();
+  const loadLicense = useLicenseStore((s) => s.load);
+  const validateLicense = useLicenseStore((s) => s.validate);
 
   useEffect(() => {
     loadSettings();
@@ -20,7 +29,10 @@ export const Layout: React.FC = () => {
       refreshWsl();
       refreshDeps();
     }
-  }, [loadSettings, refreshWsl, refreshDeps]);
+    // Muat edisi/lisensi untuk gerbang fitur Pro, lalu validasi ulang ke server
+    // (deteksi revoke/expired) best-effort.
+    loadLicense().then(() => validateLicense());
+  }, [loadSettings, refreshWsl, refreshDeps, loadLicense, validateLicense]);
 
   useEffect(() => {
     if (loaded && isTauri() && !onboardingComplete()) {

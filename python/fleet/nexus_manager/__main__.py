@@ -1,3 +1,9 @@
+# NEXUS — Copyright (c) 2026 chandafa (Nexus Security). All rights reserved.
+# Part of the Nexus security platform. Proprietary and confidential.
+# Unauthorized copying, modification, or distribution is prohibited.
+# This notice and embedded metadata must not be removed. See LICENSE / NOTICE.
+# Contact: ck271138@gmail.com
+
 # nexus_manager/__main__.py
 """
 nexus-manager — entrypoint standalone.
@@ -98,6 +104,8 @@ def main(argv=None):
     gc.add_argument("--out", default="nexus", help="prefix output (-> <out>_cert.pem/_key.pem)")
     gc.add_argument("--cn", default="nexus-manager", help="Common Name / hostname")
     sub.add_parser("info", help="tampilkan enrollment key & admin token")
+    vi = sub.add_parser("vuln-import", help="impor basis data CVE (offline) dari file JSON")
+    vi.add_argument("--file", required=True)
     s = sub.add_parser("status", help="cek apakah manager hidup")
     s.add_argument("--host", default=fc.DEFAULT_MANAGER_HOST)
     s.add_argument("--port", default=str(fc.DEFAULT_MANAGER_PORT))
@@ -121,6 +129,16 @@ def main(argv=None):
             os.environ["NEXUS_TLS_KEY"] = args.key
         res = server.serve_blocking(args.host, args.port)
         return 0 if res.get("status") != "error" else 1
+    if args.action == "vuln-import":
+        try:
+            with open(args.file, encoding="utf-8") as f:
+                data = f.read()
+        except Exception as e:
+            print(f"[error] gagal baca file: {e}", file=sys.stderr)
+            return 1
+        print(json.dumps(server.set_vulndb(data), indent=2))
+        return 0
+
     if args.action == "info":
         print(json.dumps({"enroll_key": server.get_enroll_key(),
                           "admin_token": server.get_admin_token(),

@@ -1,3 +1,9 @@
+# NEXUS — Copyright (c) 2026 chandafa (Nexus Security). All rights reserved.
+# Part of the Nexus security platform. Proprietary and confidential.
+# Unauthorized copying, modification, or distribution is prohibited.
+# This notice and embedded metadata must not be removed. See LICENSE / NOTICE.
+# Contact: ck271138@gmail.com
+
 # nexus/python/modules/scheduler.py
 """Modul Scheduler — SDD v2 §5.17. CRUD jadwal scan di DB + hitung next_run.
 Catatan: eksekusi otomatis butuh service latar; modul ini menyediakan

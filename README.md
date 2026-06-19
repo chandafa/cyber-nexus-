@@ -149,6 +149,10 @@ nexus/
 
 Pro/Enterprise features are unlocked by Ed25519-signed license tokens. Contact the vendor for licensing.
 
+## Support
+
+Licensing, sales, and security reports: **ck271138@gmail.com**
+
 ## License
 
 © 2026 chandafa (Nexus Security). The **Nexus Fleet** package is **proprietary** —

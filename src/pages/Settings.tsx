@@ -1,3 +1,9 @@
+// NEXUS — Copyright (c) 2026 chandafa (Nexus Security). All rights reserved.
+// Part of the Nexus security platform. Proprietary and confidential.
+// Unauthorized copying, modification, or distribution is prohibited.
+// This notice and embedded metadata must not be removed. See LICENSE / NOTICE.
+// Contact: ck271138@gmail.com
+
 // src/pages/Settings.tsx — SDD §11.3 + auto-install tools (§3.3).
 import React, { useEffect, useState } from "react";
 import { Ic } from "../lib/icons";
@@ -5,6 +11,7 @@ import { Select } from "../components/Select";
 import { useSettingsStore } from "../app/store/settings.store";
 import { useScanRuntimeStore } from "../app/store/scanRuntime.store";
 import { DependencyCard } from "../components/DependencyCard";
+import { LicenseSection } from "../components/LicenseSection";
 import { chooseOutputDir } from "../lib/output";
 import {
   checkForUpdate,
@@ -95,6 +102,11 @@ export const Settings: React.FC = () => {
           <p className="text-xs text-nexus-muted">Preferensi aplikasi, wordlist, dan manajemen tools</p>
         </div>
       </header>
+
+      {/* Lisensi & Edisi — gerbang fitur Pro */}
+      <div className="mb-5">
+        <LicenseSection />
+      </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         {/* Preferensi */}

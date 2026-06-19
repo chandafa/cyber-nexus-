@@ -1,3 +1,9 @@
+# NEXUS — Copyright (c) 2026 chandafa (Nexus Security). All rights reserved.
+# Part of the Nexus security platform. Proprietary and confidential.
+# Unauthorized copying, modification, or distribution is prohibited.
+# This notice and embedded metadata must not be removed. See LICENSE / NOTICE.
+# Contact: ck271138@gmail.com
+
 # nexus_common/schema.py
 """
 Skema baku Nexus Fleet — SATU bentuk untuk event, alert, dan report (item #5).
@@ -143,8 +149,11 @@ def make_alert(agent_id, rule, event, tenant_id="default", ts=None):
         "tenant_id": tenant_id,
         "level": level,
         "severity": level_to_severity(level),
-        "title": rule.get("name", event.get("title", "Alert")),
-        "description": rule.get("description", event.get("detail", "")),
+        # Judul spesifik: pakai judul EVENT (mis. "CVE-xxxx: paket versi", "Port 445
+        # (SMB)", "Proses mencurigakan: mimikatz") agar bisa di-triage; nama rule
+        # tetap tersimpan di field rule.name.
+        "title": event.get("title") or rule.get("name", "Alert"),
+        "description": rule.get("name", "") or rule.get("description", event.get("detail", "")),
         "category": event.get("category", ""),
         "event_type": event.get("event_type", ""),
         "event_ref": event.get("event_id", ""),

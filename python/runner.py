@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# NEXUS — Copyright (c) 2026 chandafa (Nexus Security). All rights reserved.
+# Part of the Nexus security platform. Proprietary and confidential.
+# Unauthorized copying, modification, or distribution is prohibited.
+# This notice and embedded metadata must not be removed. See LICENSE / NOTICE.
+# Contact: ck271138@gmail.com
+
 # nexus/python/runner.py
 """
 Central CLI dispatcher untuk Nexus Python engine.
@@ -70,6 +76,37 @@ def _parse_kwargs(argv):
 
 
 def dispatch(command: str, kwargs: dict) -> dict:
+    # -------------------------------------------------- lisensi (status & gerbang Pro)
+    # Gerbang lisensi desktop: modul GUI Pro tidak melewati gerbang manager, jadi
+    # dijaga di sini — tolak SEBELUM eksekusi bila edisi tak berhak. desktop_license
+    # menentukan command mana yang Pro (lihat PRO_COMMANDS); command Free dilewati.
+    try:
+        from core import desktop_license
+    except Exception as _lic_ex:
+        desktop_license = None
+        if command in ('license_status', 'license_apply', 'license_clear'):
+            return {"module": "license", "ok": False, "error": f"Modul lisensi gagal: {_lic_ex}"}
+
+    if desktop_license is not None:
+        if command == 'license_status':
+            return desktop_license.status()
+        if command == 'license_device_id':
+            return {"module": "license", "device_id": desktop_license.device_id(),
+                    "api_configured": bool(desktop_license.api_base())}
+        if command == 'license_redeem':
+            return desktop_license.redeem(kwargs.get('code', ''))
+        if command == 'license_validate':
+            return desktop_license.validate()
+        if command == 'license_apply':
+            return desktop_license.apply(kwargs.get('token', '') or kwargs.get('path', ''))
+        if command == 'license_clear':
+            return desktop_license.clear()
+
+        _locked = desktop_license.guard(command)
+        if _locked is not None:
+            emit_line(f"[LISENSI] {_locked['error']}")
+            return _locked
+
     # -------------------------------------------------- info / utility
     if command == 'check_deps':
         from core.dependency_checker import run_all_checks
@@ -393,6 +430,19 @@ def dispatch(command: str, kwargs: dict) -> dict:
         from modules import fleet_manager
         return fleet_manager.apply_license(kwargs.get('token', ''))
 
+    if command == 'fleet_remove_agent':
+        from modules import fleet_manager
+        return fleet_manager.remove_agent(kwargs.get('agent_id', ''),
+                                          str(kwargs.get('purge', '')).lower() in ('1', 'true', 'yes'))
+
+    if command == 'fleet_incidents':
+        from modules import fleet_manager
+        return fleet_manager.incidents(kwargs.get('status', 'open'))
+
+    if command == 'fleet_add_user':
+        from modules import fleet_manager
+        return fleet_manager.add_user(kwargs.get('role', 'viewer'))
+
     if command == 'fleet_vulndb_get':
         from modules import fleet_manager
         return {'module': 'fleet_manager', 'vuln_db': fleet_manager.get_vulndb()}
@@ -522,6 +572,14 @@ def main():
         from core.wsl_backend import get_no_demo
         if get_no_demo():
             os.environ['NEXUS_NO_DEMO'] = '1'
+    except Exception:
+        pass
+
+    # Lisensi desktop → env NEXUS_LICENSE agar manager tertanam ikut terbuka
+    # oleh key yang sama (satu key untuk modul desktop + fleet).
+    try:
+        from core import desktop_license
+        desktop_license.bootstrap_env()
     except Exception:
         pass
 

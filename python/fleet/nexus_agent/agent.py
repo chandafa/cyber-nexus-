@@ -1,3 +1,9 @@
+# NEXUS — Copyright (c) 2026 chandafa (Nexus Security). All rights reserved.
+# Part of the Nexus security platform. Proprietary and confidential.
+# Unauthorized copying, modification, or distribution is prohibited.
+# This notice and embedded metadata must not be removed. See LICENSE / NOTICE.
+# Contact: ck271138@gmail.com
+
 # nexus_agent/agent.py
 """
 Daemon endpoint Nexus Fleet: enroll, heartbeat, kumpulkan telemetri, kirim ke
@@ -250,10 +256,13 @@ def _pin_path():
 
 
 def _ensure_tls():
-    """Muat sertifikat manager yang di-pin (TOFU) bila skema HTTPS."""
+    """Muat sertifikat manager yang di-pin (TOFU) + sertifikat klien (mTLS) bila HTTPS."""
     if _get("manager_scheme", "http") == "https":
         pin = _pin_path()
-        fc.set_client_tls(cafile=pin if os.path.isfile(pin) else "", insecure=not os.path.isfile(pin))
+        fc.set_client_tls(cafile=pin if os.path.isfile(pin) else "",
+                          insecure=not os.path.isfile(pin),
+                          clientcert=os.environ.get("NEXUS_CLIENT_CERT", ""),
+                          clientkey=os.environ.get("NEXUS_CLIENT_KEY", ""))
 
 
 def _murl(path):
@@ -276,12 +285,22 @@ def enroll(manager_host, manager_port, enroll_key, name="", labels=None, tls=Fal
         try:
             with open(_pin_path(), "w", encoding="utf-8") as f:
                 f.write(fc.fetch_server_cert(manager_host, manager_port))
-            fc.set_client_tls(cafile=_pin_path())
-            log("[AGENT] Sertifikat manager di-pin (TLS TOFU).")
+            fc.set_client_tls(cafile=_pin_path(),
+                              clientcert=os.environ.get("NEXUS_CLIENT_CERT", ""),
+                              clientkey=os.environ.get("NEXUS_CLIENT_KEY", ""))
+            log("[AGENT] Sertifikat manager di-pin (TLS TOFU)"
+                + (" + sertifikat klien (mTLS)" if os.environ.get("NEXUS_CLIENT_CERT") else "") + ".")
         except Exception as e:
             return {"module": "fleet_agent", "ok": False, "error": f"gagal pin TLS cert: {e}"}
     body = {"name": name or fp["hostname"], "fingerprint": fp, "ip": fc.local_ip(),
             "labels": labels or []}
+    # Sinkronkan jam dari server lebih dulu agar enroll tahan clock-skew.
+    try:
+        h = fc.get_admin(fc.manager_url(manager_host, manager_port, "/health", scheme=scheme), timeout=5)
+        if h.get("time"):
+            fc.set_clock_offset(int(h["time"]) - fc.now())
+    except Exception:
+        pass
     try:
         resp = fc.post_enroll(fc.manager_url(manager_host, manager_port, "/enroll", scheme=scheme),
                               body, enroll_key)
@@ -371,15 +390,25 @@ def _active_response(args):
     action = args.get("action", "")
     ip = args.get("ip", "") or args.get("target", "")
     proc = args.get("process", "")
+    pol = _policy()
     cmds, detail = _remediation_plan(action, ip, proc)
+    reason = None
     if cmds is None:
-        log(f"[AGENT] Active Response ditolak: {detail} (action={action}).")
+        reason = detail
+    elif action == "block_ip":
+        protected = set(pol.get("ar_protected_ips", ["127.0.0.1"])) | {"127.0.0.1", fc.local_ip()}
+        if ip in protected:
+            reason = f"IP {ip} dilindungi (anti tembak-kaki)"
+    if reason:
+        log(f"[AGENT] Active Response ditolak: {reason} (action={action}).")
         _enqueue([{"type": "response", "severity": "low", "event_type": "active_response",
-                   "title": f"Active Response ditolak: {detail}",
-                   "data": {"action": action, "executed": False, "reason": detail},
+                   "title": f"Active Response ditolak: {reason}",
+                   "data": {"action": action, "executed": False, "reason": reason},
                    "origin": "real", "source": "response"}])
         return
-    enabled = str(_policy().get("active_response", "")).lower() in ("1", "true", "yes")
+    # Granular: butuh sakelar utama AND aksi ada di daftar yang diizinkan.
+    glob = str(pol.get("active_response", "")).lower() in ("1", "true", "yes")
+    enabled = glob and action in pol.get("ar_allowed_actions", [])
     executed = False
     if enabled:
         try:
@@ -422,6 +451,9 @@ def _heartbeat():
     except Exception as e:
         log(f"[AGENT] Heartbeat gagal (manager offline?): {e}")
         return
+    st = resp.get("server_time")               # koreksi clock-skew dari server
+    if st:
+        fc.set_clock_offset(int(st) - fc.now())
     if resp.get("policy_version", 0) != int(_get("policy_version", "0") or 0):
         try:
             pol = fc.get_admin(_murl("/policy"))

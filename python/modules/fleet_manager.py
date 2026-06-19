@@ -1,3 +1,9 @@
+# NEXUS — Copyright (c) 2026 chandafa (Nexus Security). All rights reserved.
+# Part of the Nexus security platform. Proprietary and confidential.
+# Unauthorized copying, modification, or distribution is prohibited.
+# This notice and embedded metadata must not be removed. See LICENSE / NOTICE.
+# Contact: ck271138@gmail.com
+
 # nexus/python/modules/fleet_manager.py
 """
 Adapter desktop -> paket kanonik `fleet/nexus_manager`.
@@ -26,5 +32,6 @@ from nexus_manager.server import (  # noqa: E402,F401
     get_enroll_key, get_admin_token, init_db,
     list_alerts, ack_alert, get_rules, set_rules, list_audit, report,
     posture, import_sigma, response_action, license_status, reload_license,
-    get_vulndb, set_vulndb, set_notify, apply_license,
+    get_vulndb, set_vulndb, set_notify, apply_license, remove_agent,
+    incidents, add_user, list_users,
 )

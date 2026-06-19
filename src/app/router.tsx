@@ -1,6 +1,13 @@
+// NEXUS — Copyright (c) 2026 chandafa (Nexus Security). All rights reserved.
+// Part of the Nexus security platform. Proprietary and confidential.
+// Unauthorized copying, modification, or distribution is prohibited.
+// This notice and embedded metadata must not be removed. See LICENSE / NOTICE.
+// Contact: ck271138@gmail.com
+
 // src/app/router.tsx — routing aplikasi (SDD struktur app/).
 import { createHashRouter } from "react-router-dom";
 import { Layout } from "../components/Layout";
+import { ProRouteGuard } from "../components/ProGate";
 import { Dashboard } from "../pages/Dashboard";
 import { SetupWizard } from "../pages/SetupWizard";
 import { PortScanner } from "../pages/PortScanner";
@@ -51,47 +58,49 @@ export const router = createHashRouter([
     path: "/",
     element: <Layout />,
     children: [
+      // -------- Free (selalu bisa diakses) --------
       { index: true, element: <Dashboard /> },
+      { path: "security-score", element: <SecurityScore /> },
+      { path: "terminal", element: <Shell /> },
       { path: "system-health", element: <SystemHealth /> },
       { path: "ebpf-security", element: <EbpfSecurity /> },
       { path: "port-scanner", element: <PortScanner /> },
       { path: "network-scanner", element: <NetworkScanner /> },
-      { path: "vuln-scanner", element: <VulnScanner /> },
-      { path: "password-auditor", element: <PasswordAuditor /> },
+      { path: "dns-recon", element: <DnsRecon /> },
       { path: "log-analyzer", element: <LogAnalyzer /> },
-      { path: "network-mapper", element: <NetworkMapper /> },
-      { path: "defense-monitor", element: <DefenseMonitor /> },
-      { path: "report", element: <ReportGenerator /> },
+      { path: "hash-tool", element: <HashTool /> },
+      { path: "wordlist-manager", element: <WordlistManager /> },
       { path: "history", element: <History /> },
       { path: "settings", element: <Settings /> },
 
-      // SDD v2
-      { path: "ssl-auditor", element: <SslAuditor /> },
-      { path: "exploit-lookup", element: <ExploitLookup /> },
-      { path: "api-tester", element: <ApiTester /> },
-      { path: "container-scanner", element: <ContainerScanner /> },
-      { path: "cloud-checker", element: <CloudChecker /> },
-      { path: "wireless-auditor", element: <WirelessAuditor /> },
-      { path: "security-score", element: <SecurityScore /> },
-      { path: "scan-diff", element: <ScanDiff /> },
-      { path: "asset-inventory", element: <AssetInventory /> },
-      { path: "wordlist-manager", element: <WordlistManager /> },
-      { path: "scheduler", element: <Scheduler /> },
-      { path: "attack-simulation", element: <AttackSimulation /> },
-      { path: "defense-suite", element: <DefenseSuite /> },
-      { path: "waf", element: <WAF /> },
-      { path: "human-element", element: <HumanElement /> },
-      { path: "nexus-agents", element: <NexusAgents /> },
-      // Terminal interaktif + modul baru
-      { path: "terminal", element: <Shell /> },
-      { path: "dns-recon", element: <DnsRecon /> },
-      { path: "dir-fuzzer", element: <DirFuzzer /> },
-      { path: "listener", element: <Listener /> },
-      { path: "hash-tool", element: <HashTool /> },
-
-      // Fleet / SOC
-      { path: "fleet-manager", element: <FleetManager /> },
-      { path: "fleet-agent", element: <FleetAgent /> },
+      // -------- Pro (butuh lisensi; dijaga ProRouteGuard) --------
+      // Sinkron dengan lib/proModules.ts PRO_ROUTES & desktop_license.PRO_COMMANDS.
+      {
+        element: <ProRouteGuard />,
+        children: [
+          { path: "vuln-scanner", element: <VulnScanner /> },
+          { path: "ssl-auditor", element: <SslAuditor /> },
+          { path: "api-tester", element: <ApiTester /> },
+          { path: "dir-fuzzer", element: <DirFuzzer /> },
+          { path: "network-mapper", element: <NetworkMapper /> },
+          { path: "asset-inventory", element: <AssetInventory /> },
+          { path: "password-auditor", element: <PasswordAuditor /> },
+          { path: "exploit-lookup", element: <ExploitLookup /> },
+          { path: "attack-simulation", element: <AttackSimulation /> },
+          { path: "listener", element: <Listener /> },
+          { path: "wireless-auditor", element: <WirelessAuditor /> },
+          { path: "container-scanner", element: <ContainerScanner /> },
+          { path: "cloud-checker", element: <CloudChecker /> },
+          { path: "scan-diff", element: <ScanDiff /> },
+          { path: "defense-monitor", element: <DefenseMonitor /> },
+          { path: "defense-suite", element: <DefenseSuite /> },
+          { path: "waf", element: <WAF /> },
+          { path: "report", element: <ReportGenerator /> },
+          { path: "scheduler", element: <Scheduler /> },
+          { path: "fleet-manager", element: <FleetManager /> },
+          { path: "fleet-agent", element: <FleetAgent /> },
+        ],
+      },
     ],
   },
 ]);
