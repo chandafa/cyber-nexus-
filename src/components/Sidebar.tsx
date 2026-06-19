@@ -1,8 +1,16 @@
+// NEXUS — Copyright (c) 2026 chandafa (Nexus Security). All rights reserved.
+// Part of the Nexus security platform. Proprietary and confidential.
+// Unauthorized copying, modification, or distribution is prohibited.
+// This notice and embedded metadata must not be removed. See LICENSE / NOTICE.
+// Contact: ck271138@gmail.com
+
 // src/components/Sidebar.tsx — navigasi kiri dengan collapse + theme picker.
 import React, { useEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { Ic, type IconComp } from "../lib/icons";
 import { useSettingsStore } from "../app/store/settings.store";
+import { useLicenseStore } from "../app/store/license.store";
+import { isProRoute } from "../lib/proModules";
 import { THEMES } from "../lib/theme";
 import { cn } from "../lib/utils";
 
@@ -106,6 +114,8 @@ export const Sidebar: React.FC = () => {
   const theme = useSettingsStore((s) => s.settings.theme) || "dark";
   const collapsed = useSettingsStore((s) => s.settings.sidebar_collapsed) === "true";
   const update = useSettingsStore((s) => s.update);
+  const license = useLicenseStore((s) => s.status);
+  const isLocked = (item: NavItem) => isProRoute(item.to) && !license.valid;
   const [pickerOpen, setPickerOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
@@ -178,14 +188,19 @@ export const Sidebar: React.FC = () => {
         {/* Collapsed → ikon datar; Expanded → accordion grup (kurangi scroll) */}
         {collapsed
           ? GROUPS.flatMap((g) => g.items).map((n) => (
-              <NavLink key={n.to} to={n.to} end={n.end} className={linkCls} title={n.label}>
+              <NavLink key={n.to} to={n.to} end={n.end} className={linkCls} title={isLocked(n) ? `${n.label} (Pro)` : n.label}>
                 {({ isActive }) => (
-                  <n.icon
-                    className={cn(
-                      "h-[18px] w-[18px] shrink-0 transition-colors",
-                      isActive ? "text-nexus-accent" : "text-nexus-subtle group-hover:text-nexus-muted"
+                  <span className="relative">
+                    <n.icon
+                      className={cn(
+                        "h-[18px] w-[18px] shrink-0 transition-colors",
+                        isActive ? "text-nexus-accent" : "text-nexus-subtle group-hover:text-nexus-muted"
+                      )}
+                    />
+                    {isLocked(n) && (
+                      <Ic.lock className="absolute -right-1.5 -top-1.5 h-3 w-3 text-nexus-accent" />
                     )}
-                  />
+                  </span>
                 )}
               </NavLink>
             ))
@@ -224,6 +239,11 @@ export const Sidebar: React.FC = () => {
                                 )}
                               />
                               <span className="truncate">{n.label}</span>
+                              {isLocked(n) && (
+                                <span className="ml-auto inline-flex items-center gap-1 border border-nexus-accent/40 bg-nexus-accent/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-nexus-accent">
+                                  <Ic.lock className="h-2.5 w-2.5" /> Pro
+                                </span>
+                              )}
                             </>
                           )}
                         </NavLink>

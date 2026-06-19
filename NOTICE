@@ -1,0 +1,21 @@
+NEXUS SECURITY PLATFORM
+Copyright (c) 2026 chandafa (Nexus Security). All rights reserved.
+
+"Nexus" and the Nexus logo are trademarks of chandafa (Nexus Security).
+
+This product is proprietary and confidential. It is NOT open source.
+Use is governed by the LICENSE file in this repository. Copyright notices,
+license notices, and embedded attribution/metadata must not be removed or
+altered.
+
+Components covered by this notice:
+  - Nexus Desktop (Tauri + React + Python engine)
+  - Nexus Fleet (nexus-agent, nexus-manager, nexus-cli, nexus-dashboard, nexus-license)
+  - Nexus License Server (Firebase Cloud Functions)
+  - Nexus Landing (Next.js)
+
+Cryptography:
+  - Ed25519 signing uses an adapted reference implementation (public domain).
+
+Contact: ck271138@gmail.com
+Repository: https://github.com/chandafa/cyber-nexus-

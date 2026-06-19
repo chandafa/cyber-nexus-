@@ -1,9 +1,17 @@
 {
   "name": "nexus",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
-  "description": "Nexus — AI Security Agent Desktop",
+  "description": "Nexus — developer-first security platform (desktop + fleet).",
+  "author": "chandafa (Nexus Security) <ck271138@gmail.com>",
+  "license": "SEE LICENSE IN LICENSE",
+  "copyright": "Copyright (c) 2026 chandafa (Nexus Security). All rights reserved.",
+  "homepage": "https://github.com/chandafa/cyber-nexus-",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chandafa/cyber-nexus-.git"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

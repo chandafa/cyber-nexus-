@@ -118,16 +118,24 @@ runs in **Free** mode. Contact the vendor for Pro/Enterprise licensing.
 
 ## Security Model
 
-- **Transport:** HMAC-SHA256 per-agent message signing; enrollment key + admin token.
-- **Privacy:** offline-first — scan/telemetry data is stored locally; nothing is sent to the internet.
-- **Authorized use only:** for ethical, authorized security testing on systems you own or are
-  permitted to assess.
+| Area | Protection |
+| --- | --- |
+| **Transport** | HMAC-SHA256 per-agent message signing; optional **TLS / mTLS** for the Manager API |
+| **Authentication** | Enrollment key for agents; admin token with **RBAC** roles (admin / analyst / read-only) |
+| **At rest** | Sensitive event fields encrypted at rest (Fernet); SQLite in WAL mode |
+| **Integrity** | Replay/clock-skew protection on signed messages; tamper-evident audit log |
+| **Privacy** | Offline-first — telemetry is stored locally; nothing is sent to the internet |
+| **Scope** | For ethical, **authorized** security testing on systems you own or may assess |
 
 ## Documentation
 
 - Product brief & pricing — `docs/PRODUCT-BRIEF.md`
 - IP & licensing — `docs/IP-PROTECTION.md`
 - Validation: `python tests/test_fleet.py`, `pwsh validate.ps1`, `pwsh validate_agent.ps1`
+
+## Support
+
+Licensing, sales, and security reports: **ck271138@gmail.com**
 
 ## License
 

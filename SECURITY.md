@@ -5,7 +5,7 @@
 If you discover a security vulnerability in Nexus, please report it **privately** — do **not**
 open a public issue.
 
-- Email: **surelna.studio@gmail.com** (subject: `SECURITY — Nexus`)
+- Email: **ck271138@gmail.com** (subject: `SECURITY — Nexus`)
 - Include: affected component/version, reproduction steps, and impact.
 - We aim to acknowledge within 72 hours and to provide a fix or mitigation timeline after triage.
 

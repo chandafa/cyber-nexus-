@@ -1,3 +1,9 @@
+// NEXUS — Copyright (c) 2026 chandafa (Nexus Security). All rights reserved.
+// Part of the Nexus security platform. Proprietary and confidential.
+// Unauthorized copying, modification, or distribution is prohibited.
+// This notice and embedded metadata must not be removed. See LICENSE / NOTICE.
+// Contact: ck271138@gmail.com
+
 // src/components/ResultTable.tsx — SDD bagian 9.2.
 // Tabel hasil generik dengan sort & export CSV.
 import React, { useMemo, useState } from "react";
