@@ -6,12 +6,13 @@
   "author": "chandafa (Nexus Security) <ck271138@gmail.com>",
   "license": "SEE LICENSE IN ../LICENSE",
   "scripts": {
-    "dev": "wrangler dev --local --persist-to .wrangler-local",
+    "dev": "wrangler dev --persist-to .wrangler-local",
     "deploy": "wrangler deploy",
-    "schema:local": "wrangler d1 execute nexus-license-db --local --file schema.sql --persist-to .wrangler-local",
-    "schema:remote": "wrangler d1 execute nexus-license-db --remote --file schema.sql"
+    "d1:create": "wrangler d1 create nexus-license-db",
+    "schema:local": "wrangler d1 execute nexus-license-db --local --file=schema.sql --persist-to .wrangler-local",
+    "schema:remote": "wrangler d1 execute nexus-license-db --remote --file=schema.sql"
   },
   "devDependencies": {
-    "wrangler": "^3.95.0"
+    "wrangler": "^4.0.0"
   }
 }

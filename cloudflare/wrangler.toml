@@ -1,13 +1,12 @@
 name = "nexus-license"
 main = "src/worker.js"
-compatibility_date = "2025-01-01"
+compatibility_date = "2026-06-01"
 
-# Database D1 (SQLite) — buat dengan:  wrangler d1 create nexus-license-db
-# lalu tempel database_id hasilnya di bawah.
+# Database D1 (SQLite). database_id dari `wrangler d1 create nexus-license-db`.
 [[d1_databases]]
 binding = "DB"
 database_name = "nexus-license-db"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "bc355bcf-c0a2-4218-8c89-adcf585453fd"
 
 # Secret (JANGAN di file ini) — set dengan:
 #   wrangler secret put VENDOR_SEED     (isi: hex dari ~/.nexus/vendor_private.key)

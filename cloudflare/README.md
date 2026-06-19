@@ -27,29 +27,36 @@ itu selama 30 hari. Token ditandatangani Ed25519 (kompatibel dengan verifier app
 
 ## Deploy (sekali, ±5 menit, tanpa kartu)
 
+> Butuh **wrangler v4** (terbaru 2026). `npm install` di bawah sudah memasangnya.
+
 1. **Akun Cloudflare gratis** — daftar di dash.cloudflare.com (tanpa kartu).
-2. **Install & login:**
+2. **Install (wrangler v4) & login:**
    ```bash
    cd cloudflare
    npm install
    npx wrangler login
    ```
-3. **Buat database D1** lalu tempel `database_id`-nya ke `wrangler.toml`:
+3. **Buat database D1:**
    ```bash
    npx wrangler d1 create nexus-license-db
-   npm run schema:remote        # buat tabel di D1
    ```
-4. **Set secret:**
+4. **PENTING — tempel `database_id`** dari output langkah 3 ke `wrangler.toml`
+   (ganti nilai `database_id = "..."`). Tanpa ini, langkah 5 error `Invalid uuid`.
+5. **Buat tabel di D1:**
    ```bash
-   npx wrangler secret put VENDOR_SEED   # tempel isi ~/.nexus/vendor_private.key
+   npm run schema:remote
+   ```
+6. **Set secret:**
+   ```bash
+   npx wrangler secret put VENDOR_SEED   # tempel isi ~/.nexus/vendor_private.key (hex)
    npx wrangler secret put ADMIN_TOKEN   # token rahasia bebas untuk /admin/*
    ```
-5. **Deploy:**
+7. **Deploy:**
    ```bash
    npm run deploy
    # -> https://nexus-license.<subdomain>.workers.dev
    ```
-6. **Arahkan app** — isi `python/core/license_config.py`:
+8. **Arahkan app** — isi `python/core/license_config.py`:
    ```python
    LICENSE_API_BASE = "https://nexus-license.<subdomain>.workers.dev"
    ```

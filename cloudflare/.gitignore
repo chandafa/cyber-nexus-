@@ -3,3 +3,5 @@ node_modules/
 .wrangler/
 .wrangler-local/
 *.log
+.wrangler-dryrun/
+.wrangler*/
