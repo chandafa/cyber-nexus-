@@ -20,6 +20,7 @@ interface Props {
   form: React.ReactNode;
   consoleRef: React.RefObject<ScanConsoleHandle>;
   renderResult?: (result: any) => React.ReactNode;
+  customTabs?: { id: string; label: string; render: () => React.ReactNode }[];
 }
 
 export const ModuleScaffold: React.FC<Props> = ({
@@ -30,8 +31,9 @@ export const ModuleScaffold: React.FC<Props> = ({
   form,
   consoleRef,
   renderResult,
+  customTabs,
 }) => {
-  const [tab, setTab] = useState<"terminal" | "result">("terminal");
+  const [tab, setTab] = useState<string>("terminal");
   const scan = useScanRuntimeStore((s) => s.scans[module]);
   const result = scan?.result ?? null;
   const running = scan?.running ?? false;
@@ -80,6 +82,19 @@ export const ModuleScaffold: React.FC<Props> = ({
                 Hasil
               </button>
             )}
+            {customTabs?.map((t) => (
+              <button
+                key={t.id}
+                className={`rounded-t-lg px-4 py-2 text-sm transition-colors ${
+                  tab === t.id
+                    ? "border-b-2 border-nexus-accent text-nexus-text"
+                    : "text-nexus-muted hover:text-nexus-text"
+                }`}
+                onClick={() => setTab(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
           </div>
 
           <div className="relative min-h-0 flex-1">
@@ -97,6 +112,11 @@ export const ModuleScaffold: React.FC<Props> = ({
                 )}
               </div>
             )}
+            {customTabs?.map((t) => (
+              <div key={t.id} className={`absolute inset-0 overflow-auto ${tab === t.id ? "" : "hidden"}`}>
+                {t.render()}
+              </div>
+            ))}
           </div>
         </div>
       </div>

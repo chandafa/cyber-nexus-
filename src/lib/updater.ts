@@ -89,7 +89,7 @@ export async function downloadInstallRelaunch(
   let downloaded = 0;
   onProgress({ ...base, phase: "downloading" });
 
-  await update.downloadAndInstall((event) => {
+  await update.downloadAndInstall((event: any) => {
     switch (event.event) {
       case "Started":
         total = event.data.contentLength ?? 0;

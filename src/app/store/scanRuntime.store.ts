@@ -88,6 +88,28 @@ export const useScanRuntimeStore = create<RuntimeStore>((set, get) => {
       }
     });
 
+    await listen<{ old_scan_id: string; new_scan_id: string }>("waf-watchdog-restart", (e) => {
+      const mod = "waf";
+      idToModule.set(e.payload.new_scan_id, mod);
+      idToModule.delete(e.payload.old_scan_id);
+      set((s) => {
+        const cur = s.scans[mod];
+        if (!cur) return s;
+        return {
+          scans: {
+            ...s.scans,
+            [mod]: {
+              ...cur,
+              scanId: e.payload.new_scan_id,
+              tick: cur.tick + 1,
+            }
+          }
+        };
+      });
+      buffers.get(mod)?.push(`[Watchdog] WAF process restarted automatically. New Scan ID: ${e.payload.new_scan_id}`);
+      bump(mod, {});
+    });
+
     await listen<{ scan_id: string; exit_code: number }>("scan-complete", (e) => {
       const mod = idToModule.get(e.payload.scan_id);
       if (!mod) return;

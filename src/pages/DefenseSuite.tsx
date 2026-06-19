@@ -23,7 +23,7 @@ const MITIGATIONS = [
 export const DefenseSuite: React.FC = () => {
   const [fw, setFw] = useState<any[]>([]);
   const [patches, setPatches] = useState<any[]>([]);
-  const [tab, setTab] = useState<"firewall" | "patch" | "mitigation">("firewall");
+  const [tab, setTab] = useState<"firewall" | "patch" | "mitigation" | "nexus">("firewall");
   const [loading, setLoading] = useState(false);
 
   const analyze = async () => {
@@ -48,6 +48,7 @@ export const DefenseSuite: React.FC = () => {
     { id: "firewall", label: `Firewall (${fw.length})` },
     { id: "patch", label: `Patch (${patches.length})` },
     { id: "mitigation", label: "Mitigasi" },
+    { id: "nexus", label: "Nexus Agent" },
   ] as const;
 
   return (
@@ -127,6 +128,44 @@ export const DefenseSuite: React.FC = () => {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {tab === "nexus" && (
+        <div className="nx-card p-5 space-y-4">
+          <div className="flex items-start gap-3">
+            <Ic.server className="h-6 w-6 text-nexus-accent shrink-0 mt-0.5" />
+            <div className="space-y-2 flex-1">
+              <h3 className="text-sm font-semibold text-nexus-text font-mono">
+                Deploy Hardening & Monitoring melalui Nexus Agent
+              </h3>
+              <p className="text-xs text-nexus-muted leading-relaxed font-mono">
+                Untuk menerapkan mitigasi pertahanan kernel eBPF secara remote, jalankan daemon <code className="font-mono text-nexus-text bg-nexus-panel px-1 py-0.5 rounded">nexus-agent</code> pada VPS atau server target Anda. Agent akan terhubung secara persisten ke Manager ini untuk menyalurkan telemetry keamanan dan menerima rules.
+              </p>
+
+              <div className="pt-2 space-y-3 font-mono text-xs">
+                <div className="bg-nexus-panel p-3 rounded border border-nexus-border/50">
+                  <div className="text-[10px] text-nexus-subtle mb-1 uppercase font-bold">Perintah Deployment Satu Baris:</div>
+                  <div className="flex items-center justify-between gap-2 bg-nexus-surface/50 p-2 border border-nexus-hairline rounded">
+                    <code className="text-nexus-text text-[10px] break-all select-all font-mono">
+                      curl -sSL http://YOUR_MANAGER_LAN_IP:1515/install | sudo bash
+                    </code>
+                    <button
+                      onClick={() => navigator.clipboard.writeText("curl -sSL http://YOUR_MANAGER_LAN_IP:1515/install | sudo bash")}
+                      className="nx-btn-ghost p-1 shrink-0"
+                      title="Salin"
+                    >
+                      <Ic.copy className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+                
+                <div className="text-[10.5px] text-nexus-muted">
+                  Setelah agen terpasang dan statusnya aktif, Anda dapat memantau telemetri kernel, daftar IP terblokir, dan log execve syscall langsung melalui menu <a href="#/nexus-agents" className="text-nexus-accent hover:underline font-semibold">Nexus Agent Manager</a>.
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

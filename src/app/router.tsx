@@ -36,6 +36,10 @@ import { Scheduler } from "../pages/Scheduler";
 import { AttackSimulation } from "../pages/AttackSimulation";
 import { DefenseSuite } from "../pages/DefenseSuite";
 import { WAF } from "../pages/WAF";
+import { SystemHealth } from "../pages/SystemHealth";
+import { EbpfSecurity } from "../pages/EbpfSecurity";
+import { HumanElement } from "../pages/HumanElement";
+import { NexusAgents } from "../pages/NexusAgents";
 
 // Terminal interaktif + modul baru
 import { Shell } from "../pages/Shell";
@@ -58,6 +62,8 @@ export const router = createHashRouter([
       { index: true, element: <Dashboard /> },
       { path: "security-score", element: <SecurityScore /> },
       { path: "terminal", element: <Shell /> },
+      { path: "system-health", element: <SystemHealth /> },
+      { path: "ebpf-security", element: <EbpfSecurity /> },
       { path: "port-scanner", element: <PortScanner /> },
       { path: "network-scanner", element: <NetworkScanner /> },
       { path: "dns-recon", element: <DnsRecon /> },

@@ -185,6 +185,40 @@ pub async fn run_scan(
     // Kita perlu akses Db di thread; State tidak Send. Ambil pointer via app state.
     let app_for_thread = app.clone();
 
+    // Integrasi Watchdog Supervisor jika modul yang dijalankan adalah WAF
+    if module == "waf" {
+        if let Some(sup) = app.try_state::<crate::commands::monitor::WafSupervisorState>() {
+            let mut active_id = sup.active_scan_id.lock().unwrap();
+            
+            // Jika ini manual start (active_scan_id tidak sama dengan scan_id saat ini),
+            // reset counter crash beruntun.
+            let is_manual = active_id.as_ref() != Some(&scan_id);
+            if is_manual {
+                *sup.consecutive_quick_crashes.lock().unwrap() = 0;
+            }
+            
+            *active_id = Some(scan_id.clone());
+            let mut is_enabled = sup.is_enabled.lock().unwrap();
+            *is_enabled = true; // Otomatis aktifkan watchdog saat dijalankan
+            
+            // Simpan parameter start WAF
+            *sup.command.lock().unwrap() = Some(command.clone());
+            *sup.args.lock().unwrap() = Some(args.clone());
+            *sup.target.lock().unwrap() = target.clone();
+            *sup.mode.lock().unwrap() = mode.clone();
+            
+            // Set startup/restart time untuk mendeteksi crash loop di watchdog
+            *sup.last_restart_time.lock().unwrap() = Some(chrono::Local::now());
+            
+            let mut logs = sup.logs.lock().unwrap();
+            logs.push(format!(
+                "[{}] WAF starting (watchdog enabled, scan_id: {}).",
+                chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                scan_id
+            ));
+        }
+    }
+
     let mut spawn_cmd = Command::new(python_exe(&root));
     spawn_cmd
         .arg("-u")
@@ -304,7 +338,25 @@ pub async fn run_scan(
 
 /// Hentikan scan yang sedang berjalan.
 #[tauri::command]
-pub fn stop_scan(registry: State<'_, ScanRegistry>, scan_id: String) -> Result<(), String> {
+pub fn stop_scan(
+    app: AppHandle,
+    registry: State<'_, ScanRegistry>,
+    scan_id: String,
+) -> Result<(), String> {
+    // Disable watchdog if user stops WAF manually
+    if let Some(sup) = app.try_state::<crate::commands::monitor::WafSupervisorState>() {
+        let active_id = sup.active_scan_id.lock().unwrap();
+        if active_id.as_ref() == Some(&scan_id) {
+            let mut is_enabled = sup.is_enabled.lock().unwrap();
+            *is_enabled = false;
+            let mut logs = sup.logs.lock().unwrap();
+            logs.push(format!(
+                "[{}] WAF manually stopped (watchdog disabled).",
+                chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+            ));
+        }
+    }
+
     let map = registry.0.lock().map_err(|e| e.to_string())?;
     if let Some(child) = map.get(&scan_id) {
         if let Ok(mut c) = child.lock() {

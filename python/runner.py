@@ -191,7 +191,8 @@ def dispatch(command: str, kwargs: dict) -> dict:
             'ssl_enabled': kwargs.get('ssl_enabled', 'false'),
             'ssl_cert_type': kwargs.get('ssl_cert_type', 'self_signed'),
             'ssl_cert_path': kwargs.get('ssl_cert_path', ''),
-            'ssl_key_path': kwargs.get('ssl_key_path', '')
+            'ssl_key_path': kwargs.get('ssl_key_path', ''),
+            'blacklist_ips': kwargs.get('blacklist_ips', '')
         }
         if fg:
             return waf.run_foreground(**run_args)
@@ -210,6 +211,10 @@ def dispatch(command: str, kwargs: dict) -> dict:
         limit = int(kwargs.get('limit', '200'))
         return waf.get_logs(limit=limit)
 
+    if command == 'waf_clear_logs':
+        from modules import waf
+        return waf.clear_logs()
+
     if command == 'waf_get_vhosts':
         from modules import waf
         return waf.get_vhosts()
@@ -224,7 +229,10 @@ def dispatch(command: str, kwargs: dict) -> dict:
             learning_mode=kwargs.get('learning_mode', 'false'),
             allowlist_ips=kwargs.get('allowlist_ips', ''),
             allowlist_paths=kwargs.get('allowlist_paths', ''),
-            rules_json=kwargs.get('rules_json', '[]')
+            rules_json=kwargs.get('rules_json', '[]'),
+            vhost_type=kwargs.get('vhost_type', 'proxy'),
+            root_directory=kwargs.get('root_directory', ''),
+            blacklist_ips=kwargs.get('blacklist_ips', '')
         )
 
     if command == 'waf_delete_vhost':
