@@ -161,9 +161,9 @@ export const LicenseSection: React.FC = () => {
             <Ic.close className="h-4 w-4" /> Hapus lisensi
           </button>
         </div>
-      ) : (
+      ) : status.api_configured ? (
+        /* ===== ALUR ONLINE: kode aktivasi sekali-pakai (butuh server) ===== */
         <div className="space-y-3">
-          {/* AKTIVASI VIA KODE (utama) */}
           <div>
             <label className="nx-label">Kode aktivasi</label>
             <div className="flex gap-2">
@@ -180,21 +180,9 @@ export const LicenseSection: React.FC = () => {
               </button>
             </div>
           </div>
-
-          {status.api_configured === false && (
-            <p className="flex items-start gap-2 border border-severity-medium/30 bg-severity-medium/10 p-2.5 text-[11px] leading-relaxed text-yellow-200">
-              <Ic.alert className="mt-0.5 h-4 w-4 shrink-0" />
-              Server aktivasi belum dikonfigurasi pada build ini. Kode online belum bisa dipakai
-              sampai vendor mengatur URL server lisensi.
-            </p>
-          )}
-
           <p className="text-[11px] leading-relaxed text-nexus-subtle">
-            Kode bersifat <b>sekali pakai</b> & terkunci ke perangkat ini. Edisi Free mencakup modul
-            dasar (maks. 2 agent). Beli kode untuk membuka fitur Pro selama 30 hari.
+            Kode bersifat <b>sekali pakai</b> & terkunci ke perangkat ini, berlaku 30 hari.
           </p>
-
-          {/* TOKEN MANUAL (enterprise/offline) — sekunder */}
           <button
             className="text-[11px] text-nexus-muted underline-offset-2 hover:text-nexus-text hover:underline"
             onClick={() => setManualOpen((o) => !o)}
@@ -219,6 +207,39 @@ export const LicenseSection: React.FC = () => {
               </div>
             </div>
           )}
+        </div>
+      ) : (
+        /* ===== ALUR OFFLINE device-bound: kirim Device ID, tempel token ===== */
+        <div className="space-y-3">
+          <p className="flex items-start gap-2 border border-nexus-border bg-nexus-panel/40 p-2.5 text-[11px] leading-relaxed text-nexus-muted">
+            <Ic.lock className="mt-0.5 h-4 w-4 shrink-0 text-nexus-accent" />
+            <span>
+              <b className="text-nexus-text">Cara aktivasi:</b> salin <b>Device ID</b> di atas, kirim ke
+              penjual saat membeli. Penjual mengirim <b>token aktivasi</b> khusus perangkat ini — tempel di bawah.
+            </span>
+          </p>
+          <div>
+            <label className="nx-label">Token aktivasi</label>
+            <textarea
+              className="nx-input h-20 resize-none font-mono text-xs"
+              placeholder="Tempel token aktivasi dari penjual…"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button className="nx-btn-primary" onClick={() => applyManual(token)} disabled={busy}>
+              {busy ? <Ic.refresh className="h-4 w-4 animate-spin" /> : <Ic.check className="h-4 w-4" />}
+              Aktifkan
+            </button>
+            <button className="nx-btn-ghost" onClick={() => fileRef.current?.click()} disabled={busy}>
+              <Ic.folder className="h-4 w-4" /> Unggah file .license
+            </button>
+          </div>
+          <p className="text-[11px] leading-relaxed text-nexus-subtle">
+            Token <b>terkunci ke perangkat ini</b> & berlaku 30 hari — tak bisa dipakai di perangkat lain.
+            Edisi Free mencakup modul dasar (maks. 2 agent).
+          </p>
         </div>
       )}
 

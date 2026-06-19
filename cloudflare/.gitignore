@@ -1,0 +1,8 @@
+node_modules/
+.dev.vars
+.wrangler/
+.wrangler-local/
+*.log
+.wrangler-dryrun/
+.wrangler*/
+*.local

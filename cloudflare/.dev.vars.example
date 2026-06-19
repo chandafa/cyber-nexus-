@@ -1,0 +1,4 @@
+# Salin ke .dev.vars (gitignored) untuk uji lokal `npm run dev`.
+# VENDOR_SEED = isi file ~/.nexus/vendor_private.key (hex 64 char).
+VENDOR_SEED = "PASTE_HEX_SEED_VENDOR"
+ADMIN_TOKEN = "buat-token-rahasia-bebas"

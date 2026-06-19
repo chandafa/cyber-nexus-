@@ -8,15 +8,15 @@
 """
 Konfigurasi server lisensi (diisi VENDOR sebelum build/distribusi).
 
-LICENSE_API_BASE = URL dasar Cloud Functions Firebase Anda, mis.:
-    https://asia-southeast2-NAMAPROJECT.cloudfunctions.net
+LICENSE_API_BASE = URL dasar server lisensi (Cloudflare Worker / dll), mis.:
+    https://nexus-license.<subdomain>.workers.dev
 
 App akan memanggil:
     {LICENSE_API_BASE}/redeem_license     (aktivasi kode)
     {LICENSE_API_BASE}/validate_license   (cek revoke/expired)
 
-Kosongkan untuk menonaktifkan aktivasi online (hanya lisensi manual).
+Kosongkan untuk menonaktifkan aktivasi online (hanya lisensi manual/device-bound).
 Dapat ditimpa saat runtime dengan env NEXUS_LICENSE_API.
 """
 
-LICENSE_API_BASE = ""
+LICENSE_API_BASE = "https://nexus-license.kiranacandra150.workers.dev"
