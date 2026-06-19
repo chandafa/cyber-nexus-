@@ -26,7 +26,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "postinstall": "node bin/_check-python.js"
+    "postinstall": "node bin/_check-python.js",
+    "prepack": "node -e \"const fs=require('fs'),p=require('path');(function w(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory()){if(e.name==='__pycache__')fs.rmSync(f,{recursive:true,force:true});else w(f)}else if(e.name.endsWith('.pyc')||e.name.endsWith('.pyo'))fs.rmSync(f)}})('.')\""
   },
   "repository": {
     "type": "git",
