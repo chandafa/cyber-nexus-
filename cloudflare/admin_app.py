@@ -27,6 +27,9 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _TOKEN_FILE = os.path.join(_HERE, ".admin-token.local")
 _CFG = os.path.join(os.path.dirname(_HERE), "python", "core", "license_config.py")
 
+# URL Worker default (publik, bukan rahasia) — biar tak perlu ketik tiap buka.
+DEFAULT_URL = "https://nexus-license.kiranacandra150.workers.dev"
+
 # Palet gelap.
 BG, PANEL, FG, MUTED, ACC, ACC2, DANGER = "#0e0e11", "#17171c", "#f4f4f5", "#a6a6ad", "#3ee6c0", "#6d6cff", "#ff5d6c"
 
@@ -42,7 +45,7 @@ def _load_url() -> str:
                     return v
     except Exception:
         pass
-    return ""
+    return DEFAULT_URL
 
 
 def _load_token() -> str:
