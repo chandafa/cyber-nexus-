@@ -140,7 +140,12 @@ def _post(path: str, payload: dict, timeout: int = 20) -> dict:
     req = urllib.request.Request(
         base + path,
         data=_json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            # UA wajar — hindari Cloudflare Bot Fight memblokir 'Python-urllib'.
+            "User-Agent": "Mozilla/5.0 (compatible; NexusLicense/1.1)",
+            "Accept": "application/json",
+        },
         method="POST",
     )
     try:
