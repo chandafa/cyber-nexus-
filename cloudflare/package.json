@@ -1,0 +1,17 @@
+{
+  "name": "nexus-license-worker",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Nexus license activation server (Cloudflare Worker + D1).",
+  "author": "chandafa (Nexus Security) <ck271138@gmail.com>",
+  "license": "SEE LICENSE IN ../LICENSE",
+  "scripts": {
+    "dev": "wrangler dev --local --persist-to .wrangler-local",
+    "deploy": "wrangler deploy",
+    "schema:local": "wrangler d1 execute nexus-license-db --local --file schema.sql --persist-to .wrangler-local",
+    "schema:remote": "wrangler d1 execute nexus-license-db --remote --file schema.sql"
+  },
+  "devDependencies": {
+    "wrangler": "^3.95.0"
+  }
+}

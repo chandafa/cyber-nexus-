@@ -1,0 +1,15 @@
+name = "nexus-license"
+main = "src/worker.js"
+compatibility_date = "2025-01-01"
+
+# Database D1 (SQLite) — buat dengan:  wrangler d1 create nexus-license-db
+# lalu tempel database_id hasilnya di bawah.
+[[d1_databases]]
+binding = "DB"
+database_name = "nexus-license-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+# Secret (JANGAN di file ini) — set dengan:
+#   wrangler secret put VENDOR_SEED     (isi: hex dari ~/.nexus/vendor_private.key)
+#   wrangler secret put ADMIN_TOKEN     (token rahasia untuk /admin/*)
+# Untuk dev lokal, pakai file .dev.vars (sudah di-gitignore).
