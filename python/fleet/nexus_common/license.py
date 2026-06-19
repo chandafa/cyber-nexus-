@@ -124,9 +124,30 @@ def free_entitlements(reason="no_license") -> dict:
             "features": set(), "expires": 0, "reason": reason}
 
 
+_DESKTOP_LICENSE = os.path.join(os.path.expanduser("~"), ".nexus", "desktop_license.txt")
+
+
+def _device_id() -> str:
+    try:
+        from nexus_common import device
+        return device.device_id()
+    except Exception:
+        return ""
+
+
 def entitlements(token: str = "", pubkey_hex: str = "") -> dict:
-    """Resolusi hak pakai dari token (atau FREE bila tak ada/invalid)."""
+    """
+    Resolusi hak pakai dari token (atau FREE bila tak ada/invalid).
+
+    Satu lisensi untuk GUI + CLI: bila token tak diberikan & env NEXUS_LICENSE
+    kosong, jatuh ke file lisensi desktop (~/.nexus/desktop_license.txt). Token
+    device-bound (punya field `device`) hanya berlaku di mesin yang sama.
+    """
     token = (token or os.environ.get("NEXUS_LICENSE", "")).strip()
+    # Fallback ke lisensi desktop HANYA bila NEXUS_LICENSE tak diset sama sekali
+    # (server yang menyetelnya — termasuk ke "" — tetap dihormati; test aman).
+    if not token and "NEXUS_LICENSE" not in os.environ and os.path.isfile(_DESKTOP_LICENSE):
+        token = _DESKTOP_LICENSE  # satu token mengikat GUI + CLI di mesin yang sama
     if not token:
         return free_entitlements("no_license")
     # token bisa berupa path file
@@ -139,6 +160,10 @@ def entitlements(token: str = "", pubkey_hex: str = "") -> dict:
     if not res["valid"]:
         return free_entitlements(res["reason"])
     p = res["payload"]
+    # Pengikatan device: token ber-field `device` hanya sah di mesin itu.
+    bound = p.get("device")
+    if bound and bound != _device_id():
+        return free_entitlements("device_mismatch")
     feats = set(p.get("features", []))
     return {
         "valid": True, "tier": p.get("tier", "pro"), "licensee": p.get("licensee", ""),

@@ -110,43 +110,13 @@ FEATURE_LABELS = {
 
 
 # --------------------------------------------------------------------- device id
-def _raw_machine_id() -> str:
-    """Identitas hardware paling stabil per-OS."""
-    osname = platform.system()
-    try:
-        if osname == "Windows":
-            import winreg
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-                                r"SOFTWARE\Microsoft\Cryptography") as k:
-                val, _ = winreg.QueryValueEx(k, "MachineGuid")
-                if val:
-                    return str(val)
-        elif osname == "Linux":
-            for p in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
-                if os.path.isfile(p):
-                    with open(p, encoding="utf-8") as f:
-                        v = f.read().strip()
-                        if v:
-                            return v
-        elif osname == "Darwin":
-            out = subprocess.check_output(
-                ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
-                stderr=subprocess.DEVNULL,
-            ).decode(errors="ignore")
-            import re
-            m = re.search(r'IOPlatformUUID"\s*=\s*"([^"]+)"', out)
-            if m:
-                return m.group(1)
-    except Exception:
-        pass
-    # Fallback: gabungan node + platform (kurang stabil tapi lumayan).
-    return f"{platform.node()}|{platform.machine()}|{osname}"
+# Sumber TUNGGAL fingerprint device di nexus_common.device → GUI & fleet identik,
+# sehingga 1 token device-bound berlaku untuk GUI + CLI di mesin yang sama.
+from nexus_common import device as _device  # noqa: E402
 
 
 def device_id() -> str:
-    """Fingerprint device (hash) — dipakai mengikat lisensi ke 1 perangkat."""
-    raw = _raw_machine_id() or "unknown"
-    return hashlib.sha256(("nexus-device:" + raw).encode()).hexdigest()[:32]
+    return _device.device_id()
 
 
 # --------------------------------------------------------------------- server API
