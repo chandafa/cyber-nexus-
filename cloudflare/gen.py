@@ -54,6 +54,7 @@ def main():
     g.add_argument("--licensee", default="")
     rv = sub.add_parser("revoke", help="Cabut kode.")
     rv.add_argument("code")
+    sub.add_parser("cleanup", help="Hapus kode terpakai yang sudah kedaluwarsa (manual; otomatis via cron harian).")
     args = ap.parse_args()
 
     if not args.url:
@@ -74,6 +75,12 @@ def main():
     elif args.cmd == "revoke":
         r = _post(args.url, "/admin/revoke", {"code": args.code}, args.admin)
         print("Kode dicabut." if r.get("revoked") else "Gagal / tidak ditemukan: " + str(r))
+    elif args.cmd == "cleanup":
+        r = _post(args.url, "/admin/cleanup", {}, args.admin)
+        if r.get("ok"):
+            print(f"{r.get('deleted', 0)} kode terpakai-kedaluwarsa dihapus dari database.")
+        else:
+            print("Gagal: " + str(r.get("error")))
 
 
 if __name__ == "__main__":

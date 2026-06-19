@@ -2,6 +2,10 @@ name = "nexus-license"
 main = "src/worker.js"
 compatibility_date = "2026-06-01"
 
+# Cron: tiap hari 03:17 UTC hapus kode TERPAKAI yang sudah kedaluwarsa.
+[triggers]
+crons = ["17 3 * * *"]
+
 # Database D1 (SQLite). database_id dari `wrangler d1 create nexus-license-db`.
 [[d1_databases]]
 binding = "DB"

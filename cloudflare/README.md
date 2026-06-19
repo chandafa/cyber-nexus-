@@ -17,13 +17,31 @@ itu selama 30 hari. Token ditandatangani Ed25519 (kompatibel dengan verifier app
 > Sudah **teruji end-to-end secara lokal** (Miniflare + D1): generate → redeem →
 > verifikasi token Python → tolak device lain → validate. ✔️
 
+## Aplikasi manajemen (GUI)
+```bash
+python admin_app.py
+```
+Lihat semua token, **buat / edit / hapus / cabut / reset-device / bersihkan** — semua
+langsung sinkron ke database. Token admin disembunyikan & tak hardcode (dimuat dari
+env / `.admin-token.local`, atau diisi manual). CLI ringkas tetap ada di `gen.py`.
+
+## Pembersihan otomatis
+Cron harian (`17 3 * * *` UTC) menghapus kode **terpakai (redeemed) yang kedaluwarsa**.
+Kode `unused` (stok) tidak disentuh. Manual: tombol "Bersihkan" / `gen.py cleanup` / `POST /admin/cleanup`.
+
 ## Endpoint
 | Method · Path | Guna |
 | --- | --- |
-| `POST /admin/generate` `{count,tier,days}` (header `x-admin-token`) | Buat kode di database |
-| `POST /admin/revoke` `{code}` (header `x-admin-token`) | Cabut kode |
+| `POST /admin/generate` `{count,tier,days}` | Buat kode di database |
+| `POST /admin/list` `{status?,limit?}` | Daftar semua kode |
+| `POST /admin/update` `{code, tier?/durationDays?/status?/licensee?/resetDevice?}` | Edit / reset |
+| `POST /admin/delete` `{code|codes[]}` | Hapus permanen |
+| `POST /admin/revoke` `{code}` | Cabut |
+| `POST /admin/cleanup` | Hapus kode terpakai-kedaluwarsa |
 | `POST /redeem_license` `{code,deviceId}` | Tukar (sekali pakai, kunci device) → token |
-| `POST /validate_license` `{code,deviceId}` | Status terkini (revoke/expired) |
+| `POST /validate_license` `{code,deviceId}` | Status terkini |
+
+> Semua `/admin/*` butuh header `x-admin-token`.
 
 ## Deploy (sekali, ±5 menit, tanpa kartu)
 

@@ -175,7 +175,83 @@ async function validate(req, env) {
   return json({ ok: true, status: "active", tier: row.tier, expiresAt: row.expires_at });
 }
 
+// Hapus kode yang SUDAH TERPAKAI (redeemed) dan kedaluwarsa. Kode 'unused'
+// (stok jualan) TIDAK disentuh.
+async function cleanupExpired(env) {
+  const now = Math.floor(Date.now() / 1000);
+  const r = await env.DB.prepare(
+    "DELETE FROM licenses WHERE status='redeemed' AND expires_at IS NOT NULL AND expires_at < ?"
+  ).bind(now).run();
+  return r.meta.changes || 0;
+}
+
+async function adminCleanup(req, env) {
+  if (req.headers.get("x-admin-token") !== env.ADMIN_TOKEN)
+    return json({ ok: false, error: "unauthorized" }, 401);
+  const deleted = await cleanupExpired(env);
+  return json({ ok: true, deleted });
+}
+
+function authed(req, env) {
+  return req.headers.get("x-admin-token") === env.ADMIN_TOKEN;
+}
+
+async function adminList(req, env) {
+  if (!authed(req, env)) return json({ ok: false, error: "unauthorized" }, 401);
+  const b = await readBody(req);
+  const limit = Math.min(Math.max(parseInt(b.limit || 1000, 10), 1), 5000);
+  let stmt;
+  if (["unused", "redeemed", "revoked"].includes(b.status)) {
+    stmt = env.DB.prepare("SELECT * FROM licenses WHERE status=? ORDER BY created_at DESC LIMIT ?").bind(b.status, limit);
+  } else {
+    stmt = env.DB.prepare("SELECT * FROM licenses ORDER BY created_at DESC LIMIT ?").bind(limit);
+  }
+  const { results } = await stmt.all();
+  return json({ ok: true, rows: results || [] });
+}
+
+async function adminDelete(req, env) {
+  if (!authed(req, env)) return json({ ok: false, error: "unauthorized" }, 401);
+  const b = await readBody(req);
+  const codes = Array.isArray(b.codes) ? b.codes : (b.code ? [b.code] : []);
+  if (!codes.length) return json({ ok: false, error: "missing_code" }, 400);
+  let deleted = 0;
+  for (const c of codes) {
+    const r = await env.DB.prepare("DELETE FROM licenses WHERE code=?").bind(String(c).toUpperCase()).run();
+    deleted += r.meta.changes || 0;
+  }
+  return json({ ok: true, deleted });
+}
+
+async function adminUpdate(req, env) {
+  if (!authed(req, env)) return json({ ok: false, error: "unauthorized" }, 401);
+  const b = await readBody(req);
+  const code = String(b.code || "").trim().toUpperCase();
+  if (!code) return json({ ok: false, error: "missing_code" }, 400);
+  // Reset: kembalikan kode ke 'unused' (lepas device, bisa dipakai ulang).
+  if (b.resetDevice) {
+    const r = await env.DB.prepare(
+      "UPDATE licenses SET status='unused', device_id=NULL, redeemed_at=NULL, expires_at=NULL WHERE code=?"
+    ).bind(code).run();
+    return json({ ok: true, updated: r.meta.changes || 0 });
+  }
+  const sets = [], vals = [];
+  if (["pro", "enterprise"].includes(b.tier)) { sets.push("tier=?"); vals.push(b.tier); }
+  if (b.durationDays != null) { sets.push("duration_days=?"); vals.push(Math.min(Math.max(parseInt(b.durationDays, 10), 1), 3650)); }
+  if (["unused", "redeemed", "revoked"].includes(b.status)) { sets.push("status=?"); vals.push(b.status); }
+  if (typeof b.licensee === "string") { sets.push("licensee=?"); vals.push(b.licensee); }
+  if (!sets.length) return json({ ok: false, error: "no_fields" }, 400);
+  vals.push(code);
+  const r = await env.DB.prepare(`UPDATE licenses SET ${sets.join(", ")} WHERE code=?`).bind(...vals).run();
+  return json({ ok: true, updated: r.meta.changes || 0 });
+}
+
 export default {
+  // Cron Trigger: jalan otomatis (lihat wrangler.toml [triggers]) -> bersih-bersih.
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(cleanupExpired(env));
+  },
+
   async fetch(req, env) {
     const url = new URL(req.url);
     if (req.method === "OPTIONS") return new Response(null, { status: 204 });
@@ -184,6 +260,10 @@ export default {
       switch (url.pathname) {
         case "/admin/generate": return await adminGenerate(req, env);
         case "/admin/revoke": return await adminRevoke(req, env);
+        case "/admin/cleanup": return await adminCleanup(req, env);
+        case "/admin/list": return await adminList(req, env);
+        case "/admin/delete": return await adminDelete(req, env);
+        case "/admin/update": return await adminUpdate(req, env);
         case "/redeem_license": return await redeem(req, env);
         case "/validate_license": return await validate(req, env);
         default: return json({ ok: false, error: "not_found" }, 404);
