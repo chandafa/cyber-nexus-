@@ -104,7 +104,10 @@ pub async fn start_nexus_listener(
                                     let customized_script = INSTALLER_SCRIPT
                                         .replace("MANAGER_IP=\"127.0.0.1\"", &format!("MANAGER_IP=\"{}\"", local_ip))
                                         .replace("PORT_DATA=\"1514\"", &format!("PORT_DATA=\"{}\"", port_data))
-                                        .replace("PORT_ENROLL=\"1515\"", &format!("PORT_ENROLL=\"{}\"", port_enroll));
+                                        .replace("PORT_ENROLL=\"1515\"", &format!("PORT_ENROLL=\"{}\"", port_enroll))
+                                        // Selalu sajikan dengan LF — CRLF (Windows) merusak bash di Linux.
+                                        .replace("\r\n", "\n")
+                                        .replace('\r', "\n");
                                     
                                     let http_response = format!(
                                         "HTTP/1.1 200 OK\r\n\

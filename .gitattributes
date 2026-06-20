@@ -1,0 +1,4 @@
+# Skrip yang dijalankan di Linux WAJIB LF — CRLF (Windows) merusak bash
+# (mis. install-agent.sh yang disajikan oleh listener Nexus Agents).
+*.sh   text eol=lf
+*.bash text eol=lf
