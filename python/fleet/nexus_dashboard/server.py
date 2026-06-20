@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 try:
     from nexus_common import __version__
 except Exception:  # pragma: no cover — dijalankan lepas dari paket
-    __version__ = "1.2.0"
+    __version__ = "1.2.1"
 
 
 def main():
