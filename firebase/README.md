@@ -1,12 +1,17 @@
 <div align="center">
 
-# Nexus License Server (Firebase)
+# Nexus License Server (Firebase) — DEPRECATED
 
 **Aktivasi lisensi sekali-pakai, terkunci-device, bulanan — di atas Firebase.**
 
 Cloud Functions (Python) · Cloud Firestore · Ed25519
 
 </div>
+
+> ⚠️ **Tidak dipakai lagi.** Server lisensi produksi kini berjalan di **Cloudflare Workers + D1**
+> (gratis, tanpa kartu) — lihat [`../cloudflare/`](../cloudflare). Folder ini disimpan sebagai
+> referensi desain awal saja: Firebase Cloud Functions memerlukan paket Blaze (billing), sehingga
+> ditinggalkan.
 
 ---
 

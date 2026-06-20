@@ -37,12 +37,16 @@ BG, PANEL, FG, MUTED, ACC, ACC2, DANGER = "#0e0e11", "#17171c", "#f4f4f5", "#a6a
 def _load_url() -> str:
     if os.environ.get("NEXUS_LICENSE_API"):
         return os.environ["NEXUS_LICENSE_API"].strip()
+    # Baca nilai LICENSE_API_BASE dengan meng-import modul config (bukan parsing
+    # teks — agar baris dalam docstring tidak salah tertangkap).
     try:
-        for line in open(_CFG, encoding="utf-8"):
-            if line.strip().startswith("LICENSE_API_BASE") and "=" in line:
-                v = line.split("=", 1)[1].strip().strip('"').strip("'")
-                if v:
-                    return v
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("_nexus_license_config", _CFG)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        v = (getattr(mod, "LICENSE_API_BASE", "") or "").strip()
+        if v.startswith("http"):
+            return v
     except Exception:
         pass
     return DEFAULT_URL

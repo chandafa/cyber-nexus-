@@ -41,17 +41,37 @@ _THREAD = None
 _ENT = None
 
 
+def _license_token() -> str:
+    """
+    Token lisensi aktif manager (urutan): config license_token (hot-reload) >
+    env NEXUS_LICENSE > file lisensi desktop (~/.nexus/desktop_license.txt).
+
+    Fallback ke lisensi desktop dilakukan eksplisit di sini supaya manager yang
+    berjalan TETAP menghormati lisensi PRO/ENTERPRISE walau proses GUI menyetel
+    NEXUS_LICENSE="" — satu key untuk GUI + Fleet di mesin yang sama.
+    """
+    t = (_get_cfg("license_token") or "").strip()
+    if t:
+        return t
+    env = os.environ.get("NEXUS_LICENSE", "").strip()
+    if env:
+        return env
+    if os.path.isfile(licensing._DESKTOP_LICENSE):
+        return licensing._DESKTOP_LICENSE
+    return ""
+
+
 def ent() -> dict:
     """Hak pakai (entitlements) — dari config license_token (hot-reload) atau env. Cache per proses."""
     global _ENT
     if _ENT is None:
-        _ENT = licensing.entitlements(token=_get_cfg("license_token") or "")
+        _ENT = licensing.entitlements(token=_license_token())
     return _ENT
 
 
 def reload_license() -> dict:
     global _ENT
-    _ENT = licensing.entitlements(token=_get_cfg("license_token") or "")
+    _ENT = licensing.entitlements(token=_license_token())
     return _ENT
 
 
@@ -323,8 +343,12 @@ def _enroll(body, raw, enroll_sig) -> tuple:
     if not fc.verify(_get_cfg("enroll_key"), raw, enroll_sig):
         return 401, {"error": "enrollment key tidak valid"}
     # Gerbang lisensi: batas jumlah agent sesuai tier (FREE = beberapa, PRO = seat,
-    # ENTERPRISE = unlimited).
+    # ENTERPRISE = unlimited). Bila manager start sebelum lisensi diterapkan, ia
+    # meng-cache tier FREE; muat ulang sekali di sini agar lisensi PRO yang baru
+    # ditebus (desktop/env) langsung dihormati tanpa perlu restart manager.
     e = ent()
+    if not e.get("valid"):
+        e = reload_license()
     if e["max_agents"] is not None:
         c0 = _conn()
         n = c0.execute("SELECT COUNT(*) n FROM agents").fetchone()["n"]
@@ -699,11 +723,13 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         full = self.path.split("?", 1)[0]
-        # static dashboard
-        if full in ("/", "/index.html", "/app.js", "/style.css"):
+        # static dashboard — sajikan berkas apa pun di folder dashboard (html/js/css/svg/ico).
+        # Aman dari path-traversal: nama dinormalisasi & wajib berada di dalam _DASHBOARD_DIR.
+        if full == "/" or os.path.splitext(full)[1] in _STATIC:
             fname = "index.html" if full == "/" else full.lstrip("/")
-            fpath = os.path.join(_DASHBOARD_DIR, fname)
-            if os.path.isfile(fpath):
+            fpath = os.path.normpath(os.path.join(_DASHBOARD_DIR, fname))
+            if (fpath == _DASHBOARD_DIR or fpath.startswith(_DASHBOARD_DIR + os.sep)) \
+                    and os.path.isfile(fpath):
                 return self._send_file(fpath)
         path = self._path()
         if path == "/health":

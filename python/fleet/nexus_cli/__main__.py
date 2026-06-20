@@ -30,11 +30,13 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nexus_common import protocol as fc  # noqa: E402
+from nexus_common import __version__  # noqa: E402
 from nexus_cli import admin, menu  # noqa: E402
 
 
 def main(argv=None):
     p = argparse.ArgumentParser(prog="nexus-cli", description="Console keamanan & admin Nexus Fleet")
+    p.add_argument("-V", "--version", action="version", version=f"nexus-cli {__version__}")
     p.add_argument("--host", default=fc.DEFAULT_MANAGER_HOST)
     p.add_argument("--port", default=str(fc.DEFAULT_MANAGER_PORT))
     p.add_argument("--token", default=os.environ.get("NEXUS_ADMIN_TOKEN", ""))

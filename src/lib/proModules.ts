@@ -23,6 +23,8 @@ export const PRO_ROUTES: string[] = [
   "/scan-diff",
   "/defense-monitor",
   "/defense-suite",
+  "/nexus-agents",
+  "/human-element",
   "/waf",
   "/report",
   "/fleet-manager",

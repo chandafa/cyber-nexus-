@@ -36,6 +36,11 @@ TIER_FEATURES = {
     "enterprise": ["unlimited_agents"] + _PRO,
 }
 FREE_MAX_AGENTS = 2
+PRO_DEFAULT_SEATS = 50                    # default seat PRO bila token tak memuat max_agents
+
+# Default seat per-tier (dipakai sebagai cadangan bila token valid tak punya field
+# max_agents). PRO = seat-based (50), ENTERPRISE = unlimited (None).
+DEFAULT_SEATS = {"free": FREE_MAX_AGENTS, "pro": PRO_DEFAULT_SEATS, "enterprise": None}
 
 _VENDOR_PUBKEY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                    "vendor_public.key")
@@ -165,11 +170,34 @@ def entitlements(token: str = "", pubkey_hex: str = "") -> dict:
     if bound and bound != _device_id():
         return free_entitlements("device_mismatch")
     feats = set(p.get("features", []))
+    tier = p.get("tier", "pro")
     return {
-        "valid": True, "tier": p.get("tier", "pro"), "licensee": p.get("licensee", ""),
-        "max_agents": None if "unlimited_agents" in feats else int(p.get("max_agents", FREE_MAX_AGENTS)),
+        "valid": True, "tier": tier, "licensee": p.get("licensee", ""),
+        "max_agents": _resolve_seats(tier, feats, p.get("max_agents")),
         "features": feats, "expires": int(p.get("expires", 0) or 0), "reason": "ok",
     }
+
+
+def _resolve_seats(tier: str, feats: set, raw_max) -> "int | None":
+    """
+    Hitung batas seat (None = unlimited). Aturan, anti salah-konfigurasi:
+      - fitur unlimited_agents / tier enterprise  -> unlimited (None)
+      - token punya max_agents > 0                -> hormati nilai itu (seat-based PRO)
+      - token tanpa max_agents (atau <= 0)         -> default per-tier; PRO -> 50, FREE -> 2
+    Ini mencegah lisensi PRO yang token-nya tak memuat max_agents jatuh ke batas FREE (2).
+    """
+    if "unlimited_agents" in feats or tier == "enterprise":
+        return None
+    try:
+        if raw_max is not None:
+            n = int(raw_max)
+            if n <= 0:               # 0/negatif diperlakukan unlimited (defensif)
+                return None
+            return n
+    except (TypeError, ValueError):
+        pass
+    default = DEFAULT_SEATS.get(tier, FREE_MAX_AGENTS)
+    return default if default is None else int(default)
 
 
 def has(ent: dict, feature: str) -> bool:

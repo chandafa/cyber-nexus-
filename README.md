@@ -91,17 +91,34 @@ Native toolchain — **Windows:** VS C++ Build Tools + WebView2 · **macOS:** `x
 
 **Fleet only:** Python **3.8+** (no other dependencies — the agent is stdlib-only).
 
+## Which edition do I install?
+
+Pick the path that matches how you want to use Nexus — they share **one license** (a single
+Pro/Enterprise token unlocks both the desktop app and the CLI on the **same device**).
+
+| You want to… | Install | How |
+| --- | --- | --- |
+| **Use the desktop app** (GUI) — clickable modules, terminal, reports | **Nexus Desktop** | Run the installer (`Nexus_<ver>_x64-setup.exe`) or build from source. Redeem your Pro code in **Settings → License**. |
+| **Run on servers / automate** (CLI + Fleet) — manager, agents, dashboard, scripting | **Nexus Fleet** | `pip install nexus-fleet` (or `npm i -g nexus-fleet`). Apply your token with `NEXUS_LICENSE`. |
+| **Both on one machine** | **Both** | Install the Desktop app **and** `pip install nexus-fleet`. Redeem the Pro code **once in the GUI** — the CLI/Fleet automatically reuse the same device-bound license (`~/.nexus/desktop_license.txt`). No second code needed. |
+
 ## Quick start
 
 **Nexus Fleet** (no desktop build required):
 
 ```bash
 pip install nexus-fleet          # or: npm install -g nexus-fleet
-nexus-manager run --host 0.0.0.0 --port 8765      # server + dashboard at :8765/
-nexus-agent  enroll --host <manager> --port 8765 --key <ENROLL_KEY>
-nexus-agent  start               # endpoint daemon
-nexus-cli                        # interactive SOC console
+nexus --version                  # verify install (prints: nexus 1.2.1)
+
+nexus manager run --host 0.0.0.0 --port 8765   # server + dashboard at :8765/
+nexus manager info                              # show enrollment key & admin token
+nexus agent enroll --host <manager> --port 8765 --key <ENROLL_KEY>
+nexus agent start                               # endpoint daemon
+nexus cli                                        # interactive SOC console
 ```
+
+> `nexus` is the umbrella command; the standalone `nexus-manager` / `nexus-agent` /
+> `nexus-cli` / `nexus-dashboard` / `nexus-license` commands work identically.
 
 **Nexus Desktop:**
 

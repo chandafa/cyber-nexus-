@@ -422,6 +422,17 @@ def main():
     pro_tok = lic.issue(_SEED, "HotReload", tier="pro", days=365, max_agents=5)
     ra = mgr.apply_license(pro_tok)
     check("apply_license hot-reload -> pro", ra.get("ok") and ra.get("tier") == "pro")
+    # Regresi: token PRO seat-based menghormati max_agents (bukan jatuh ke FREE=2).
+    pro50 = lic.issue(_SEED, "Seat50", tier="pro", days=365, max_agents=50)
+    mgr.apply_license(pro50)
+    check("pro seat-based max_agents=50", mgr.license_status()["max_agents"] == 50)
+    # Regresi inti bug: token PRO TANPA field max_agents -> default seat PRO (50), bukan 2.
+    pro_nomax = lic.issue(_SEED, "NoMax", tier="pro", days=365, max_agents=None)
+    en = lic.entitlements(token=pro_nomax)
+    check("pro tanpa max_agents -> 50 (bukan 2)", en["max_agents"] == lic.PRO_DEFAULT_SEATS)
+    # Regresi: ENTERPRISE = unlimited (None) walau max_agents token = 0.
+    ent0 = lic.issue(_SEED, "Ent", tier="enterprise", days=365, max_agents=0)
+    check("enterprise -> unlimited (None)", lic.entitlements(token=ent0)["max_agents"] is None)
     mgr.apply_license("")          # kembali ke free utk seksi 28
     check("apply kosong -> free", mgr.license_status()["tier"] == "free")
 
