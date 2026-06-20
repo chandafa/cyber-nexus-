@@ -1,17 +1,29 @@
 // src/pages/HumanElement.tsx — Layer 8 Human Element: Phishing & Security Awareness
-import React, { useState } from "react";
+// Data NYATA dari backend (modules/human_element.py, persist di SQLite) — bukan demo.
+import React, { useState, useEffect, useCallback } from "react";
 import { Ic } from "../lib/icons";
+import { runToolJson } from "../lib/tauri";
 
 interface Campaign {
   id: string;
   name: string;
-  targetGroup: string;
+  target_group: string;
   schedule: string;
   status: string;
-  clickRate: string;
-  reportRate: string;
-  lastRun: string;
+  click_rate: number | null;
+  report_rate: number | null;
+  last_run: string | null;
 }
+
+interface HeStats {
+  campaigns_total: number;
+  avg_click_rate: number | null;
+  avg_report_rate: number | null;
+  quiz_attempts: number;
+  quiz_pass_rate: number | null;
+}
+
+const pct = (v: number | null) => (v == null ? "—" : `${v}%`);
 
 const CAMPAIGN_TEMPLATES = [
   { value: "gcp_alert", label: "[Urgent] GCP Billing Threshold Exceeded", level: "Medium" },
@@ -21,7 +33,7 @@ const CAMPAIGN_TEMPLATES = [
 ];
 
 const TARGET_GROUPS = ["Seluruh Karyawan", "Departemen Keuangan", "Tim Engineering & Devs", "Divisi Sales & Marketing"];
-const SCHEDULES = ["Jalankan Sekarang (Simulasi)", "Setiap Hari Senin (09:00)", "Setiap Awal Bulan", "Kustom Cron"];
+const SCHEDULES = ["Jalankan Sekarang (Drill)", "Setiap Hari Senin (09:00)", "Setiap Awal Bulan", "Kustom Cron"];
 
 const QUIZ_QUESTIONS = [
   {
@@ -57,33 +69,16 @@ const QUIZ_QUESTIONS = [
 ];
 
 export const HumanElement: React.FC = () => {
-  // Campaign State
-  const [campaigns, setCampaigns] = useState<Campaign[]>([
-    {
-      id: "1",
-      name: "[Urgent] GCP Billing Threshold Exceeded",
-      targetGroup: "Tim Engineering & Devs",
-      schedule: "Setiap Awal Bulan",
-      status: "Aktif",
-      clickRate: "8%",
-      reportRate: "72%",
-      lastRun: "2026-06-01 09:00"
-    },
-    {
-      id: "2",
-      name: "CEO Request: Urgent Wire Transfer Confirmation",
-      targetGroup: "Departemen Keuangan",
-      schedule: "Jalankan Sekarang (Simulasi)",
-      status: "Selesai",
-      clickRate: "24%",
-      reportRate: "58%",
-      lastRun: "2026-06-15 11:30"
-    }
-  ]);
+  // Campaign State (dimuat dari backend NYATA)
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [stats, setStats] = useState<HeStats | null>(null);
+  const [simLogs, setSimLogs] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>("");
 
   const [selectedTemplate, setSelectedTemplate] = useState("gcp_alert");
   const [selectedGroup, setSelectedGroup] = useState("Tim Engineering & Devs");
-  const [selectedSchedule, setSelectedSchedule] = useState("Jalankan Sekarang (Simulasi)");
+  const [selectedSchedule, setSelectedSchedule] = useState("Jalankan Sekarang (Drill)");
 
   // Quiz State
   const [currentQuestion, setCurrentQuestion] = useState(0);
@@ -92,46 +87,60 @@ export const HumanElement: React.FC = () => {
   const [quizScore, setQuizScore] = useState(0);
   const [quizFinished, setQuizFinished] = useState(false);
 
-  // Simulation Logs
-  const [simLogs, setSimLogs] = useState<string[]>([
-    "[09:00:00] [AWARENESS] Modul simulasi edukasi diaktifkan.",
-    "[09:01:05] [DRILL] Kampanye #2 'CEO Request' didistribusikan ke Departemen Keuangan (12 staf).",
-    "[09:05:40] [DRILL] Statistik Kampanye #2: 3 staf mengklik link simulasi (24%).",
-    "[09:12:15] [DRILL] Statistik Kampanye #2: 7 staf mendeteksi & melaporkan email (58%).",
-    "[09:30:00] [DRILL] Kampanye #2 selesai. Tingkat kepatuhan/awareness: Medium-High."
-  ]);
+  const applyData = (d: any) => {
+    if (d.campaigns) setCampaigns(d.campaigns);
+    if (d.stats) setStats(d.stats);
+    if (d.logs) setSimLogs(d.logs);
+  };
 
-  const handleScheduleCampaign = () => {
+  const load = useCallback(async () => {
+    try {
+      setError("");
+      const d = await runToolJson<any>("human_element", ["--submode", "overview"]);
+      applyData(d);
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleScheduleCampaign = async () => {
     const template = CAMPAIGN_TEMPLATES.find(t => t.value === selectedTemplate);
-    if (!template) return;
+    if (!template || busy) return;
+    setBusy(true);
+    try {
+      const d = await runToolJson<any>("human_element", [
+        "--submode", "create",
+        "--name", template.label,
+        "--target_group", selectedGroup,
+        "--schedule", selectedSchedule,
+        "--template", selectedTemplate,
+      ]);
+      applyData(d);
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
-    const newCampaign: Campaign = {
-      id: String(campaigns.length + 1),
-      name: template.label,
-      targetGroup: selectedGroup,
-      schedule: selectedSchedule,
-      status: selectedSchedule.includes("Sekarang") ? "Selesai" : "Aktif",
-      clickRate: selectedSchedule.includes("Sekarang") ? "12%" : "-",
-      reportRate: selectedSchedule.includes("Sekarang") ? "80%" : "-",
-      lastRun: new Date().toISOString().replace('T', ' ').substring(0, 16)
-    };
+  const handleDeleteCampaign = async (id: string) => {
+    try {
+      const d = await runToolJson<any>("human_element", ["--submode", "delete", "--id", id]);
+      applyData(d);
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    }
+  };
 
-    setCampaigns([newCampaign, ...campaigns]);
-
-    // Add log
-    const timestamp = new Date().toTimeString().split(' ')[0];
-    const newLogs = [
-      `[${timestamp}] [DRILL] Menjadwalkan kampanye baru: '${template.label}' untuk '${selectedGroup}'.`,
-      `[${timestamp}] [DRILL] Trigger penjadwalan mode: ${selectedSchedule}.`,
-      ...(selectedSchedule.includes("Sekarang") 
-        ? [
-            `[${timestamp}] [DRILL] [SIM] Mengirimkan email tiruan ke grup target ${selectedGroup}...`,
-            `[${timestamp}] [DRILL] [SIM] Hasil: Click-through rate 12%, Pelaporan insiden 80%.`
-          ]
-        : [])
-    ];
-
-    setSimLogs(prev => [...newLogs, ...prev]);
+  const handleClearLogs = async () => {
+    try {
+      await runToolJson<any>("human_element", ["--submode", "clear_logs"]);
+      setSimLogs([]);
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    }
   };
 
   const handleAnswerSubmit = (optionIndex: number) => {
@@ -150,6 +159,10 @@ export const HumanElement: React.FC = () => {
       setCurrentQuestion(prev => prev + 1);
     } else {
       setQuizFinished(true);
+      // Catat skor kuis NYATA ke backend (quizScore sudah mencakup semua jawaban benar).
+      runToolJson<any>("human_element", [
+        "--submode", "quiz", "--score", String(quizScore), "--total", String(QUIZ_QUESTIONS.length),
+      ]).then((d) => { if (d?.stats) setStats(d.stats); if (d?.logs) setSimLogs(d.logs); }).catch(() => {});
     }
   };
 
@@ -173,27 +186,33 @@ export const HumanElement: React.FC = () => {
         </div>
       </header>
 
-      {/* Grid Stats */}
+      {error && (
+        <div className="bg-red-950/30 border border-red-800 text-red-300 text-xs font-mono px-4 py-2 rounded-lg">
+          {error}
+        </div>
+      )}
+
+      {/* Grid Stats — dihitung dari data NYATA (DB) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-nexus-panel border border-nexus-hairline p-4 rounded-xl space-y-1">
-          <span className="text-[10px] text-nexus-muted font-semibold uppercase tracking-wider font-mono">Simulations Run</span>
-          <div className="text-2xl font-bold text-nexus-text font-mono">4 Kampanye</div>
-          <span className="text-[10px] text-green-400 font-mono">Active tracking enabled</span>
+          <span className="text-[10px] text-nexus-muted font-semibold uppercase tracking-wider font-mono">Drills Recorded</span>
+          <div className="text-2xl font-bold text-nexus-text font-mono">{stats?.campaigns_total ?? 0} Kampanye</div>
+          <span className="text-[10px] text-green-400 font-mono">Tersimpan di database</span>
         </div>
         <div className="bg-nexus-panel border border-nexus-hairline p-4 rounded-xl space-y-1">
           <span className="text-[10px] text-nexus-muted font-semibold uppercase tracking-wider font-mono">Avg Click-Through</span>
-          <div className="text-2xl font-bold text-red-400 font-mono">14.7%</div>
-          <span className="text-[10px] text-red-500 font-mono">↓ 3.2% dari kuartal lalu</span>
+          <div className="text-2xl font-bold text-red-400 font-mono">{pct(stats?.avg_click_rate ?? null)}</div>
+          <span className="text-[10px] text-nexus-muted font-mono">{stats?.avg_click_rate == null ? "belum ada hasil drill" : "rata-rata tercatat"}</span>
         </div>
         <div className="bg-nexus-panel border border-nexus-hairline p-4 rounded-xl space-y-1">
           <span className="text-[10px] text-nexus-muted font-semibold uppercase tracking-wider font-mono">Incident Report Rate</span>
-          <div className="text-2xl font-bold text-green-400 font-mono">70.0%</div>
-          <span className="text-[10px] text-green-400 font-mono">↑ 8.5% peningkatan kesadaran</span>
+          <div className="text-2xl font-bold text-green-400 font-mono">{pct(stats?.avg_report_rate ?? null)}</div>
+          <span className="text-[10px] text-nexus-muted font-mono">{stats?.avg_report_rate == null ? "belum ada hasil drill" : "rata-rata tercatat"}</span>
         </div>
         <div className="bg-nexus-panel border border-nexus-hairline p-4 rounded-xl space-y-1">
           <span className="text-[10px] text-nexus-muted font-semibold uppercase tracking-wider font-mono">Quiz Pass Rate</span>
-          <div className="text-2xl font-bold text-nexus-accent font-mono">92%</div>
-          <span className="text-[10px] text-nexus-accent font-mono">100% staff IT lulus</span>
+          <div className="text-2xl font-bold text-nexus-accent font-mono">{stats?.quiz_pass_rate == null ? "—" : `${stats.quiz_pass_rate}%`}</div>
+          <span className="text-[10px] text-nexus-accent font-mono">{stats?.quiz_attempts ?? 0} percobaan kuis</span>
         </div>
       </div>
 
@@ -250,9 +269,10 @@ export const HumanElement: React.FC = () => {
               <div className="flex items-end">
                 <button
                   onClick={handleScheduleCampaign}
-                  className="w-full bg-nexus-accent/20 hover:bg-nexus-accent/30 text-nexus-accent border border-nexus-accent/50 hover:border-nexus-accent transition-all rounded-lg py-2 text-xs font-semibold font-mono flex items-center justify-center gap-2"
+                  disabled={busy}
+                  className="w-full bg-nexus-accent/20 hover:bg-nexus-accent/30 text-nexus-accent border border-nexus-accent/50 hover:border-nexus-accent transition-all rounded-lg py-2 text-xs font-semibold font-mono flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                  <Ic.play className="h-3.5 w-3.5" /> Luncurkan Kampanye
+                  <Ic.play className="h-3.5 w-3.5" /> {busy ? "Menyimpan…" : "Luncurkan Kampanye"}
                 </button>
               </div>
             </div>
@@ -268,21 +288,31 @@ export const HumanElement: React.FC = () => {
                     <th className="p-3">Status</th>
                     <th className="p-3">Klik</th>
                     <th className="p-3">Lapor</th>
+                    <th className="p-3"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-nexus-hairline">
+                  {campaigns.length === 0 && (
+                    <tr><td colSpan={7} className="p-4 text-center text-nexus-subtle italic font-mono text-[11px]">
+                      Belum ada kampanye drill. Buat satu di atas — datanya tersimpan nyata di database.
+                    </td></tr>
+                  )}
                   {campaigns.map(c => (
                     <tr key={c.id} className="hover:bg-nexus-surface/20">
                       <td className="p-3 font-semibold text-nexus-text font-mono truncate max-w-[180px]" title={c.name}>{c.name}</td>
-                      <td className="p-3 text-nexus-muted">{c.targetGroup}</td>
+                      <td className="p-3 text-nexus-muted">{c.target_group}</td>
                       <td className="p-3 text-nexus-muted font-mono text-[10px]">{c.schedule}</td>
                       <td className="p-3">
                         <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${c.status === 'Aktif' ? 'bg-green-950/40 text-green-300 border border-green-800' : 'bg-gray-800 text-gray-400'}`}>
                           {c.status}
                         </span>
                       </td>
-                      <td className="p-3 font-mono text-red-300 font-semibold">{c.clickRate}</td>
-                      <td className="p-3 font-mono text-green-300 font-semibold">{c.reportRate}</td>
+                      <td className="p-3 font-mono text-red-300 font-semibold">{pct(c.click_rate)}</td>
+                      <td className="p-3 font-mono text-green-300 font-semibold">{pct(c.report_rate)}</td>
+                      <td className="p-3">
+                        <button onClick={() => handleDeleteCampaign(c.id)}
+                          className="text-[10px] text-nexus-muted hover:text-red-400 font-mono">Hapus</button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -413,8 +443,8 @@ export const HumanElement: React.FC = () => {
                 <Ic.terminal className="h-4 w-4 text-nexus-accent" />
                 <h2 className="text-sm font-semibold text-nexus-text font-mono">Simulation Terminal</h2>
               </div>
-              <button 
-                onClick={() => setSimLogs([])}
+              <button
+                onClick={handleClearLogs}
                 className="text-[10px] text-nexus-muted hover:text-nexus-text font-mono font-semibold"
               >
                 Clear
