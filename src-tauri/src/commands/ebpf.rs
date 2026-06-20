@@ -19,7 +19,10 @@ pub struct EbpfState {
     pub packets_inspected: Mutex<u64>,
     pub packets_dropped: Mutex<u64>,
     pub mode: Mutex<String>,
+    // Hanya dibaca pada jalur eBPF Linux (aya); di OS lain disimpan tapi tak dibaca.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub xdp_link: Mutex<Option<Box<dyn std::any::Any + Send>>>,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub kprobe_link: Mutex<Option<Box<dyn std::any::Any + Send>>>,
 }
 

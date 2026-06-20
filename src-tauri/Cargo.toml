@@ -1,6 +1,6 @@
 [package]
 name = "nexus"
-version = "1.2.0"
+version = "1.2.1"
 description = "Nexus — developer-first security platform"
 authors = ["chandafa (Nexus Security)"]
 edition = "2021"

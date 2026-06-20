@@ -244,7 +244,7 @@ async function savePolicy() {
   let pol;
   try { pol = JSON.parse($("policy-json").value); }
   catch (e) { setMsg("policy-msg", t("pol.invalid") + e.message, "err"); return; }
-  try { await post("/policy", pol); setMsg("policy-msg", t("pol.saved"), "ok"); }
+  try { await post("/policy", { policy: pol }); setMsg("policy-msg", t("pol.saved"), "ok"); }
   catch (e) { setMsg("policy-msg", `${t("toast.failed")}: ${e.message}`, "err"); }
 }
 function setMsg(id, text, kind) { const el = $(id); el.textContent = text; el.className = "msg " + (kind || ""); }

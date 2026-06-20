@@ -304,6 +304,10 @@ def dispatch(command: str, kwargs: dict) -> dict:
         from modules import scheduler
         return scheduler.run(**kwargs)
 
+    if command == 'human_element':
+        from modules import human_element
+        return human_element.run(**kwargs)
+
     if command == 'wordlist':
         from modules import wordlist_manager
         return wordlist_manager.run(kwargs.get('submode', 'list'), kwargs.get('name', ''))
