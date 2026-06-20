@@ -30,6 +30,18 @@ impl Default for NexusAgentListenerState {
     }
 }
 
+/// Deteksi IP LAN utama tanpa mengirim paket (UDP connect hanya menetapkan rute).
+fn detect_lan_ip() -> String {
+    use std::net::UdpSocket;
+    UdpSocket::bind("0.0.0.0:0")
+        .and_then(|s| {
+            s.connect("8.8.8.8:80")?;
+            s.local_addr()
+        })
+        .map(|a| a.ip().to_string())
+        .unwrap_or_else(|_| "127.0.0.1".to_string())
+}
+
 #[tauri::command]
 pub fn get_nexus_listener_status(state: State<'_, NexusAgentListenerState>) -> Result<Value, String> {
     let running = *state.is_running.lock().unwrap();
@@ -40,6 +52,7 @@ pub fn get_nexus_listener_status(state: State<'_, NexusAgentListenerState>) -> R
         "is_running": running,
         "port_1514": p1514,
         "port_1515": p1515,
+        "lan_ip": detect_lan_ip(),
         "connected_agents": agents,
     }))
 }
