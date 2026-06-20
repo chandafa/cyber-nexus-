@@ -82,25 +82,33 @@ pip install nexus-fleet
 npm install -g nexus-fleet
 ```
 
-Both install five commands: `nexus-manager`, `nexus-agent`, `nexus-cli`, `nexus-dashboard`,
-`nexus-license`. Requires **Python 3.8+** on the host.
+Both install the umbrella command **`nexus`** plus five standalone commands: `nexus-manager`,
+`nexus-agent`, `nexus-cli`, `nexus-dashboard`, `nexus-license`. Requires **Python 3.8+** on the host.
+
+```bash
+nexus --version       # prints: nexus 1.2.0   (verify the install on any terminal)
+nexus --help          # list sub-commands
+```
 
 ## Quick Start
 
 ```bash
 # 1. Central server (also serves the dashboard at http://<host>:8765/)
-nexus-manager run --host 0.0.0.0 --port 8765
-nexus-manager info                       # prints enrollment key + admin token
+nexus manager run --host 0.0.0.0 --port 8765
+nexus manager info                       # prints enrollment key + admin token
 
 # 2. On each endpoint
-nexus-agent enroll --host <manager> --port 8765 --key <ENROLL_KEY> --labels prod,web
-nexus-agent start                        # runs as a daemon (see deploy/ for service files)
+nexus agent enroll --host <manager> --port 8765 --key <ENROLL_KEY> --labels prod,web
+nexus agent start                        # runs as a daemon (see deploy/ for service files)
 
 # 3. Administration
-nexus-cli                                # interactive SOC console (network & web menus)
-nexus-cli --token <ADMIN_TOKEN> alerts   # list alerts (rule engine + MITRE)
-nexus-cli --token <ADMIN_TOKEN> report   # consistent report (schema nexus.report/v1)
+nexus cli                                # interactive SOC console (network & web menus)
+nexus cli --token <ADMIN_TOKEN> alerts   # list alerts (rule engine + MITRE)
+nexus cli --token <ADMIN_TOKEN> report   # consistent report (schema nexus.report/v1)
 ```
+
+> Each `nexus <sub>` form maps to the matching standalone command (`nexus manager run`
+> ≡ `nexus-manager run`). Use whichever you prefer.
 
 Run as a boot-time service using the units in [`deploy/`](./deploy) (systemd / Windows Task Scheduler).
 
@@ -108,13 +116,16 @@ Run as a boot-time service using the units in [`deploy/`](./deploy) (systemd / W
 
 | | **Free** | **Pro** | **Enterprise** |
 | --- | --- | --- | --- |
-| Agents | 2 | seat-based | Unlimited |
+| Agents (seats) | 2 | seat-based (default 50) | Unlimited |
 | Detection rules | Core | Full (FIM, web audit, SCA, vuln) | Full |
 | Sigma import · Active Response | — | ✓ | ✓ |
 | Web/app audit · Reports · Posture score | Limited | ✓ | ✓ |
 
 Licensing is enforced by Ed25519-signed tokens (`nexus-license`). Without a license, the Manager
-runs in **Free** mode. Contact the vendor for Pro/Enterprise licensing.
+runs in **Free** mode (2 agents). A **Pro** token is **seat-based** — it allows up to its seat count
+(default 50) of agents to enroll; **Enterprise** is unlimited. One token unlocks the desktop GUI, the
+CLI, and Fleet on the **same device** (`~/.nexus/desktop_license.txt`). Apply a token to the Manager
+with `NEXUS_LICENSE=<token-or-file>` or `nexus cli apply-license`. Contact the vendor for licensing.
 
 ## Security Model
 

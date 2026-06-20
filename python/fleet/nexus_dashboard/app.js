@@ -1,24 +1,63 @@
-// nexus-dashboard — UI monitoring fleet (vanilla JS, query REST API manager).
+// NEXUS — Copyright (c) 2026 chandafa (Nexus Security). All rights reserved.
+// Part of the Nexus security platform. Proprietary and confidential.
+// Unauthorized copying, modification, or distribution is prohibited.
+// This notice and embedded metadata must not be removed. See LICENSE / NOTICE.
+// Contact: ck271138@gmail.com
+
+// app.js — SPA dashboard Nexus Fleet (vanilla JS, query REST API manager).
 const $ = (id) => document.getElementById(id);
 let timer = null;
+let connected = false;
+let curView = "overview";
 
-function base() {
-  return `http://${$("host").value.trim()}:${$("port").value.trim()}/api/v1`;
-}
-function headers() {
-  return { "X-Admin-Token": $("token").value.trim() };
-}
+function base() { return `http://${$("host").value.trim()}:${$("port").value.trim()}/api/v1`; }
+function headers() { return { "X-Admin-Token": $("token").value.trim() }; }
 
 async function api(path) {
   const r = await fetch(base() + path, { headers: headers() });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
-
-function setOnline(ok) {
-  $("dot").className = "dot " + (ok ? "on" : "off");
+async function post(path, body) {
+  const r = await fetch(base() + path, {
+    method: "POST", headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+  return j;
 }
 
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"]/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+function toast(msg, kind = "") {
+  const el = $("toast");
+  el.textContent = msg; el.className = "toast show " + kind;
+  clearTimeout(el._t); el._t = setTimeout(() => (el.className = "toast"), 2600);
+}
+function setConn(ok) {
+  connected = ok;
+  const s = $("conn-status");
+  s.className = "conn-status " + (ok ? "on" : "off");
+  s.querySelector("[data-icon]").innerHTML = icon(ok ? "online" : "offline");
+  $("conn-label").textContent = t(ok ? "conn.connected" : "conn.offline");
+}
+
+// ============ Routing ============
+function showView(name) {
+  curView = name;
+  document.querySelectorAll(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
+  document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.dataset.view === name));
+  localStorage.setItem("nx_view", name);
+  if (name === "help") renderHelp();
+  if (name === "policy") loadPolicy();
+  if (name === "license") loadLicense();
+  if (name === "incidents") loadIncidents();
+}
+
+// ============ Refresh loop ============
 async function refresh() {
   try {
     const st = await api("/stats");
@@ -27,23 +66,38 @@ async function refresh() {
     $("s-events").textContent = st.events_total ?? 0;
     $("s-open").textContent = st.alerts_open ?? 0;
     $("s-risk").textContent = st.risk_score ?? 0;
-    setOnline(true);
-  } catch (e) {
-    setOnline(false);
-    return;
+    const badge = $("nav-alerts-badge");
+    badge.textContent = st.alerts_open ?? 0;
+    badge.classList.toggle("show", (st.alerts_open ?? 0) > 0);
+    setConn(true);
+  } catch (e) { setConn(false); return; }
+
+  try { renderAlerts((await api("/alerts?limit=200" + ($("astatus").value ? "&status=" + $("astatus").value : ""))).alerts || []); } catch {}
+  try { renderAgents((await api("/agents")).agents || []); } catch {}
+  try { renderEvents((await api("/events?limit=200")).events || []); } catch {}
+  try { renderSeats(await api("/license")); } catch {}
+  if (curView === "license") loadLicense();
+  if (curView === "incidents") loadIncidents();
+}
+
+// ============ Overview: seats + recent ============
+function tierClass(t) { return (t || "free").toLowerCase(); }
+function renderSeats(lic) {
+  const used = parseInt($("s-agents").textContent || "0", 10);
+  const max = lic.max_agents;
+  const tier = (lic.tier || "free").toUpperCase();
+  $("side-tier").textContent = tier; $("side-tier").className = "lic-pill " + tierClass(lic.tier);
+  $("seat-tier").textContent = tier; $("seat-tier").className = "lic-pill " + tierClass(lic.tier);
+  const fill = $("seatbar-fill");
+  if (max == null) {
+    $("seat-text").textContent = `${used} / ∞`;
+    fill.style.width = "12%"; fill.className = "seatbar-fill";
+  } else {
+    const pct = max ? Math.min(100, Math.round((used / max) * 100)) : 0;
+    $("seat-text").textContent = `${used} / ${max}`;
+    fill.style.width = pct + "%";
+    fill.className = "seatbar-fill" + (pct >= 100 ? " full" : pct >= 80 ? " warn" : "");
   }
-  try {
-    const al = await api("/alerts?limit=200" + ($("astatus").value ? "&status=" + $("astatus").value : ""));
-    renderAlerts(al.alerts || []);
-  } catch {}
-  try {
-    const a = await api("/agents");
-    renderAgents(a.agents || []);
-  } catch {}
-  try {
-    const ev = await api("/events?limit=200");
-    renderEvents(ev.events || []);
-  } catch {}
 }
 
 function renderAlerts(alerts) {
@@ -51,21 +105,21 @@ function renderAlerts(alerts) {
   tb.innerHTML = "";
   $("alerts-empty").style.display = alerts.length ? "none" : "block";
   for (const a of alerts) {
-    const tr = document.createElement("tr");
     const mitre = (a.mitre || []).join(", ");
     const next = a.status === "open" ? "ack" : a.status === "ack" ? "resolved" : "open";
+    const tr = document.createElement("tr");
     tr.innerHTML = `
       <td style="white-space:nowrap">${esc(a.ts_iso)}</td>
-      <td><b>${a.level}</b></td>
-      <td><span class="sev ${a.severity}">${a.severity}</span></td>
-      <td style="color:var(--subtle)">${esc(a.rule_id)}</td>
-      <td>${esc(a.title)}<br><span style="color:var(--subtle);font-size:10px">${esc(a.recommendation || "")}</span></td>
+      <td><b>${esc(a.level)}</b></td>
+      <td><span class="sev ${esc(a.severity)}">${esc(a.severity)}</span></td>
+      <td class="sub">${esc(a.rule_id)}</td>
+      <td>${esc(a.title)}<br><span class="sub">${esc(a.recommendation || "")}</span></td>
       <td style="color:var(--low)">${esc(mitre)}</td>
-      <td style="color:var(--subtle)">${esc((a.agent_id || "").slice(0, 12))}</td>
+      <td class="sub">${esc((a.agent_id || "").slice(0, 12))}</td>
       <td>
-        <button class="act" data-id="${esc(a.id)}" data-next="${next}">${esc(a.status)} → ${next}</button>
+        <button class="act" data-id="${esc(a.id)}" data-next="${next}">${esc(a.status)} → ${next}</button><br>
         <button class="act fix" data-rid="${esc(a.rule_id || "")}" data-agent="${esc(a.agent_id || "")}"
-          data-proc="${esc((a.target && a.target.process) || "")}" title="Auto-remediation (dry-run default)">🛡 Amankan</button>
+          data-proc="${esc((a.target && a.target.process) || "")}">${esc(t("alerts.secure"))}</button>
       </td>`;
     tb.appendChild(tr);
   }
@@ -73,6 +127,16 @@ function renderAlerts(alerts) {
     b.addEventListener("click", () => ackAlert(b.dataset.id, b.dataset.next)));
   tb.querySelectorAll(".act.fix").forEach((b) =>
     b.addEventListener("click", () => remediate(b.dataset.rid, b.dataset.agent, b.dataset.proc)));
+  // recent (overview): first 6
+  const rb = document.querySelector("#recent-alerts tbody");
+  rb.innerHTML = "";
+  $("recent-empty").style.display = alerts.length ? "none" : "block";
+  for (const a of alerts.slice(0, 6)) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td><span class="sev ${esc(a.severity)}">${esc(a.severity)}</span></td>
+      <td>${esc(a.title)}</td><td class="sub" style="white-space:nowrap">${esc(a.ts_iso)}</td>`;
+    rb.appendChild(tr);
+  }
 }
 
 function suggestedAction(ruleId, proc) {
@@ -83,41 +147,21 @@ function suggestedAction(ruleId, proc) {
     return { action: "block_ip" };
   return { action: "harden" };
 }
-
 async function remediate(ruleId, agentId, proc) {
   const sug = suggestedAction(ruleId, proc);
   if (sug.action === "block_ip") {
-    const ip = prompt("Blokir IP mana? (kosongkan untuk batal)");
-    if (!ip) return;
-    sug.ip = ip;
+    const ip = prompt("Block which IP? (empty = cancel)");
+    if (!ip) return; sug.ip = ip;
   }
-  if (!confirm(`Kirim remediasi "${sug.action}" ke agent?\n` +
-      `(Default DRY-RUN — eksekusi nyata hanya jika policy.active_response aktif.)`)) return;
+  if (!confirm(`Send "${sug.action}" remediation to the agent?\n(Dry-run by default — real execution only if policy.active_response is on.)`)) return;
   try {
-    const r = await fetch(base() + "/response/actions", {
-      method: "POST",
-      headers: { ...headers(), "Content-Type": "application/json" },
-      body: JSON.stringify({ agent_id: agentId, ...sug }),
-    });
-    const j = await r.json();
-    alert(j.ok ? `Remediasi "${sug.action}" diantri ke agent.` : `Gagal: ${j.error || r.status}`);
-  } catch (e) {
-    alert("Gagal: " + e.message);
-  }
+    const j = await post("/response/actions", { agent_id: agentId, ...sug });
+    toast(j.ok ? `"${sug.action}" → ${t("toast.queued")}` : `${t("toast.failed")}: ${j.error || ""}`, j.ok ? "ok" : "err");
+  } catch (e) { toast(`${t("toast.failed")}: ${e.message}`, "err"); }
 }
-
 async function ackAlert(id, status) {
-  try {
-    const r = await fetch(base() + "/alerts/ack", {
-      method: "POST",
-      headers: { ...headers(), "Content-Type": "application/json" },
-      body: JSON.stringify({ id, status }),
-    });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    refresh();
-  } catch (e) {
-    alert("Gagal: " + e.message);
-  }
+  try { await post("/alerts/ack", { id, status }); refresh(); }
+  catch (e) { toast(`${t("toast.failed")}: ${e.message}`, "err"); }
 }
 
 function renderAgents(agents) {
@@ -127,16 +171,29 @@ function renderAgents(agents) {
   for (const a of agents) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${esc(a.name || a.hostname)}<br><span style="color:var(--subtle);font-size:10px">${esc(a.agent_id)}</span></td>
-      <td>${esc(a.hostname)}<br><span style="color:var(--subtle);font-size:10px">${esc(a.os)} ${esc(a.os_release || "")}</span></td>
+      <td>${esc(a.name || a.hostname)}<br><span class="sub">${esc(a.agent_id)}</span></td>
+      <td>${esc(a.hostname)}<br><span class="sub">${esc(a.os)} ${esc(a.os_release || "")}</span></td>
       <td>${esc(a.ip || "—")}</td>
-      <td class="status ${a.status}">● ${a.status}</td>
+      <td class="st ${esc(a.status)}">● ${esc(a.status)}</td>
       <td>${esc(a.last_seen_iso)}</td>
-      <td><button class="act" data-id="${esc(a.agent_id)}">scan now</button></td>`;
+      <td>
+        <button class="act" data-scan="${esc(a.agent_id)}">${esc(t("agents.scan"))}</button>
+        <button class="act danger" data-remove="${esc(a.agent_id)}">${esc(t("agents.remove"))}</button>
+      </td>`;
     tb.appendChild(tr);
   }
-  tb.querySelectorAll(".act").forEach((b) =>
-    b.addEventListener("click", () => sendCommand(b.dataset.id)));
+  tb.querySelectorAll("[data-scan]").forEach((b) => b.addEventListener("click", () => sendCommand(b.dataset.scan)));
+  tb.querySelectorAll("[data-remove]").forEach((b) => b.addEventListener("click", () => removeAgent(b.dataset.remove)));
+}
+async function sendCommand(agentId) {
+  try { await post("/command", { agent_id: agentId, command: "collect_now", args: {} });
+    toast(`collect_now → ${t("toast.queued")} (${agentId.slice(0, 10)})`, "ok"); }
+  catch (e) { toast(`${t("toast.failed")}: ${e.message}`, "err"); }
+}
+async function removeAgent(agentId) {
+  if (!confirm(t("agents.confirmRemove"))) return;
+  try { await post("/agents/remove", { agent_id: agentId }); toast("OK", "ok"); refresh(); }
+  catch (e) { toast(`${t("toast.failed")}: ${e.message}`, "err"); }
 }
 
 function renderEvents(events) {
@@ -149,53 +206,116 @@ function renderEvents(events) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td style="white-space:nowrap">${esc(e.ts_iso)}</td>
-      <td><span class="sev ${e.severity}">${e.severity}</span></td>
-      <td>${esc(e.type)}</td>
-      <td>${esc(e.title)}</td>
-      <td style="color:var(--subtle)">${esc((e.agent_id || "").slice(0, 12))}</td>`;
+      <td><span class="sev ${esc(e.severity)}">${esc(e.severity)}</span></td>
+      <td>${esc(e.type)}</td><td>${esc(e.title)}</td>
+      <td class="sub">${esc((e.agent_id || "").slice(0, 12))}</td>`;
     tb.appendChild(tr);
   }
 }
 
-async function sendCommand(agentId) {
-  try {
-    const r = await fetch(base() + "/command", {
-      method: "POST",
-      headers: { ...headers(), "Content-Type": "application/json" },
-      body: JSON.stringify({ agent_id: agentId, command: "collect_now", args: {} }),
-    });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    alert("Perintah collect_now diantri untuk " + agentId);
-  } catch (e) {
-    alert("Gagal: " + e.message);
+// ============ Incidents ============
+async function loadIncidents() {
+  if (!connected) return;
+  let data;
+  try { data = await api("/incidents?status=open"); } catch { return; }
+  const incs = data.incidents || [];
+  const tb = document.querySelector("#incidents tbody");
+  tb.innerHTML = "";
+  $("incidents-empty").style.display = incs.length ? "none" : "block";
+  for (const i of incs) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${esc(i.title || i.key || i.rule_id || "—")}<br><span class="sub">${esc(i.key || "")}</span></td>
+      <td>${esc(i.count ?? (i.alerts ? i.alerts.length : ""))}</td>
+      <td><span class="sev ${esc(i.severity || i.max_severity || "info")}">${esc(i.severity || i.max_severity || "info")}</span></td>
+      <td class="sub">${esc((i.agents || []).join(", ") || (i.agent_id || "").slice(0, 12))}</td>
+      <td class="sub" style="white-space:nowrap">${esc(i.last_iso || i.ts_iso || "")}</td>`;
+    tb.appendChild(tr);
   }
 }
 
-function esc(s) {
-  return String(s ?? "").replace(/[&<>"]/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// ============ Policy ============
+async function loadPolicy() {
+  if (!connected) { $("policy-json").value = t("common.connectFirst"); return; }
+  try { const p = await api("/policy"); $("policy-json").value = JSON.stringify(p.policy || p, null, 2); }
+  catch (e) { $("policy-json").value = `// ${e.message}`; }
+}
+async function savePolicy() {
+  let pol;
+  try { pol = JSON.parse($("policy-json").value); }
+  catch (e) { setMsg("policy-msg", t("pol.invalid") + e.message, "err"); return; }
+  try { await post("/policy", pol); setMsg("policy-msg", t("pol.saved"), "ok"); }
+  catch (e) { setMsg("policy-msg", `${t("toast.failed")}: ${e.message}`, "err"); }
+}
+function setMsg(id, text, kind) { const el = $(id); el.textContent = text; el.className = "msg " + (kind || ""); }
+
+// ============ License ============
+async function loadLicense() {
+  if (!connected) return;
+  let lic;
+  try { lic = await api("/license"); } catch { return; }
+  renderSeats(lic);
+  const tier = (lic.tier || "free").toUpperCase();
+  $("lic-tier").textContent = tier; $("lic-tier").className = "lic-pill " + tierClass(lic.tier);
+  $("lic-valid").textContent = lic.valid ? t("lic.valid") : t("lic.invalid");
+  $("lic-valid").style.color = lic.valid ? "var(--ok)" : "var(--subtle)";
+  $("lic-licensee").textContent = lic.licensee || "—";
+  $("lic-seats").textContent = lic.max_agents == null ? t("lic.unlimited") : lic.max_agents;
+  $("lic-expires").textContent = lic.expires_iso || (lic.expires ? lic.expires : t("common.never"));
+  const fb = $("lic-features"); fb.innerHTML = "";
+  for (const f of (lic.features || [])) { const s = document.createElement("span"); s.className = "chip"; s.textContent = f; fb.appendChild(s); }
+  $("lic-note").textContent = (!lic.valid || lic.tier === "free") ? t("lic.free.note", { n: lic.max_agents ?? 2 }) : "";
 }
 
+// ============ Connect / theme / lang ============
 function connect() {
   if (timer) clearInterval(timer);
-  // persist
   localStorage.setItem("nx_host", $("host").value);
   localStorage.setItem("nx_port", $("port").value);
-  // Admin token disimpan di sessionStorage (terhapus saat tab ditutup) — kurangi
-  // paparan bila ada XSS, dan tak persist seperti localStorage.
-  sessionStorage.setItem("nx_token", $("token").value);
+  sessionStorage.setItem("nx_token", $("token").value);  // token: sessionStorage (kurangi paparan XSS)
   refresh();
   timer = setInterval(refresh, 4000);
 }
+function toggleTheme() {
+  const root = document.documentElement;
+  const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  root.setAttribute("data-theme", next);
+  localStorage.setItem("nx_theme", next);
+  $("theme-toggle").querySelector("[data-icon]").innerHTML = icon(next === "dark" ? "moon" : "sun");
+}
+function toggleLang() {
+  setLang(LANG === "id" ? "en" : "id");
+  $("lang-label").textContent = LANG.toUpperCase();
+}
+window.onLangChange = () => { setConn(connected); if (curView === "help") renderHelp(); };
 
 window.addEventListener("DOMContentLoaded", () => {
+  // tema & bahasa
+  const theme = localStorage.getItem("nx_theme") || "dark";
+  document.documentElement.setAttribute("data-theme", theme);
+  hydrateIcons();
+  applyI18n();
+  $("lang-label").textContent = LANG.toUpperCase();
+  $("theme-toggle").querySelector("[data-icon]").innerHTML = icon(theme === "dark" ? "moon" : "sun");
+  setConn(false);
+
+  // restore koneksi
   $("host").value = localStorage.getItem("nx_host") || $("host").value;
   $("port").value = localStorage.getItem("nx_port") || $("port").value;
   $("token").value = sessionStorage.getItem("nx_token") || "";
+
+  // nav
+  document.querySelectorAll(".nav-item").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
+  showView(localStorage.getItem("nx_view") || "overview");
+
+  // controls
   $("connect").addEventListener("click", connect);
-  $("refresh").addEventListener("click", refresh);
-  $("sev").addEventListener("change", refresh);
-  $("arefresh").addEventListener("click", refresh);
-  $("astatus").addEventListener("change", refresh);
+  $("refresh-all").addEventListener("click", refresh);
+  $("theme-toggle").addEventListener("click", toggleTheme);
+  $("lang-toggle").addEventListener("click", toggleLang);
+  $("sev").addEventListener("change", () => refresh());
+  $("astatus").addEventListener("change", () => refresh());
+  $("policy-save").addEventListener("click", savePolicy);
+
   if ($("token").value) connect();
 });

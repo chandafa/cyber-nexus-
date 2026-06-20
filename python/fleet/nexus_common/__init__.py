@@ -5,3 +5,7 @@
 # Contact: ck271138@gmail.com
 
 """nexus_common — primitif bersama untuk semua komponen Nexus Fleet."""
+
+# Sumber tunggal versi paket (selaras dengan pyproject.toml). Semua CLI memakai
+# nilai ini untuk `--version` agar tak pernah ada selisih versi.
+__version__ = "1.2.0"

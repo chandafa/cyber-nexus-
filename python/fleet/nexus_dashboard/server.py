@@ -17,12 +17,20 @@ Server statis ini berguna bila ingin meng-host dashboard di mesin/port terpisah
 """
 import argparse
 import os
+import sys
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from functools import partial
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    from nexus_common import __version__
+except Exception:  # pragma: no cover — dijalankan lepas dari paket
+    __version__ = "1.2.0"
 
 
 def main():
     p = argparse.ArgumentParser(prog="nexus-dashboard")
+    p.add_argument("-V", "--version", action="version", version=f"nexus-dashboard {__version__}")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8080)
     args = p.parse_args()

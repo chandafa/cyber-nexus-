@@ -3,8 +3,9 @@
 #   pip install nexus-fleet                 (atau: pipx install nexus-fleet)
 #   pip install git+https://github.com/<you>/nexus-fleet
 #
-# Memasang 4 perintah berdiri-sendiri:
-#   nexus-manager · nexus-agent · nexus-cli · nexus-dashboard
+# Memasang perintah payung `nexus` + 5 sub-CLI berdiri-sendiri:
+#   nexus (umbrella; `nexus --version`, `nexus manager run ...`)
+#   nexus-manager · nexus-agent · nexus-cli · nexus-dashboard · nexus-license
 # Hanya stdlib — agent tetap ringan untuk endpoint.
 [build-system]
 requires = ["setuptools>=61"]
@@ -38,6 +39,7 @@ Homepage = "https://github.com/chandafa/cyber-nexus-"
 Issues = "https://github.com/chandafa/cyber-nexus-/issues"
 
 [project.scripts]
+nexus = "nexus_cli.nexus:main"
 nexus-manager = "nexus_manager.__main__:main"
 nexus-agent = "nexus_agent.__main__:main"
 nexus-cli = "nexus_cli.__main__:main"

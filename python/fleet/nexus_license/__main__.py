@@ -30,10 +30,12 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from nexus_common import license as lic  # noqa: E402
+from nexus_common import __version__  # noqa: E402
 
 
 def main(argv=None):
     p = argparse.ArgumentParser(prog="nexus-license", description="Penerbit lisensi Nexus (vendor)")
+    p.add_argument("-V", "--version", action="version", version=f"nexus-license {__version__}")
     sub = p.add_subparsers(dest="action", required=True)
 
     kg = sub.add_parser("keygen", help="buat keypair + tanam public key ke paket")

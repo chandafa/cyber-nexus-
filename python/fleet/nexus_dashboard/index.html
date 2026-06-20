@@ -1,71 +1,190 @@
 <!DOCTYPE html>
-<html lang="id">
+<!--
+  NEXUS — Copyright (c) 2026 chandafa (Nexus Security). All rights reserved.
+  Part of the Nexus security platform. Proprietary and confidential.
+  This notice and embedded metadata must not be removed. See LICENSE / NOTICE.
+-->
+<html lang="id" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Nexus Dashboard — Fleet Monitoring</title>
+  <title>Nexus Fleet — Dashboard</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header>
-    <div class="brand"><span class="logo">◆</span> NEXUS <span class="sub">Fleet Dashboard</span></div>
-    <div class="conn">
-      <input id="host" placeholder="manager host" value="127.0.0.1" />
-      <input id="port" placeholder="port" value="8765" style="width:70px" />
-      <input id="token" placeholder="admin token" type="password" />
-      <button id="connect">Connect</button>
-      <span id="dot" class="dot off" title="status"></span>
-    </div>
-  </header>
-
-  <section class="cards">
-    <div class="card"><div class="big" id="s-agents">0</div><div class="lbl">Agents</div></div>
-    <div class="card"><div class="big" id="s-online">0</div><div class="lbl">Online</div></div>
-    <div class="card"><div class="big" id="s-events">0</div><div class="lbl">Events</div></div>
-    <div class="card"><div class="big crit" id="s-open">0</div><div class="lbl">Open alerts</div></div>
-    <div class="card"><div class="big crit" id="s-risk">0</div><div class="lbl">Risk score</div></div>
-  </section>
-
-  <section class="panel alerts-panel">
-    <h2>Alerts <span class="hint">rule engine · MITRE ATT&CK · klik untuk ack/resolve</span></h2>
-    <div class="filters">
-      <select id="astatus"><option value="">semua status</option>
-        <option value="open">open</option><option value="ack">ack</option>
-        <option value="resolved">resolved</option></select>
-      <button id="arefresh" class="ghost">Refresh</button>
-    </div>
-    <table id="alerts"><thead><tr>
-      <th>Waktu</th><th>Lvl</th><th>Severity</th><th>Rule</th><th>Title</th>
-      <th>MITRE</th><th>Agent</th><th>Status</th>
-    </tr></thead><tbody></tbody></table>
-    <p class="empty" id="alerts-empty">Belum ada alert.</p>
-  </section>
-
-  <main>
-    <div class="panel">
-      <h2>Agents</h2>
-      <table id="agents"><thead><tr>
-        <th>Name</th><th>Host / OS</th><th>IP</th><th>Status</th><th>Last seen</th><th></th>
-      </tr></thead><tbody></tbody></table>
-      <p class="empty" id="agents-empty">Belum ada agent. Hubungkan & enroll endpoint.</p>
-    </div>
-
-    <div class="panel">
-      <h2>Security Events</h2>
-      <div class="filters">
-        <select id="sev"><option value="">semua severity</option>
-          <option>critical</option><option>high</option><option>medium</option>
-          <option>low</option><option>info</option></select>
-        <button id="refresh" class="ghost">Refresh</button>
+  <div class="app">
+    <!-- ============ Sidebar ============ -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-logo" data-icon="logo" data-size="22"></span>
+        <span class="brand-name">NEXUS</span>
+        <span class="brand-sub" data-i18n="app.tagline">Fleet Monitoring</span>
       </div>
-      <table id="events"><thead><tr>
-        <th>Waktu</th><th>Severity</th><th>Type</th><th>Title</th><th>Agent</th>
-      </tr></thead><tbody></tbody></table>
-      <p class="empty" id="events-empty">Belum ada event.</p>
-    </div>
-  </main>
+      <nav class="nav">
+        <button class="nav-item active" data-view="overview"><i data-icon="overview"></i><span data-i18n="nav.overview">Overview</span></button>
+        <button class="nav-item" data-view="agents"><i data-icon="agents"></i><span data-i18n="nav.agents">Agents</span></button>
+        <button class="nav-item" data-view="alerts"><i data-icon="alerts"></i><span data-i18n="nav.alerts">Alerts</span><span class="badge" id="nav-alerts-badge"></span></button>
+        <button class="nav-item" data-view="events"><i data-icon="events"></i><span data-i18n="nav.events">Events</span></button>
+        <button class="nav-item" data-view="incidents"><i data-icon="incidents"></i><span data-i18n="nav.incidents">Incidents</span></button>
+        <button class="nav-item" data-view="policy"><i data-icon="policy"></i><span data-i18n="nav.policy">Policy</span></button>
+        <button class="nav-item" data-view="license"><i data-icon="license"></i><span data-i18n="nav.license">License</span></button>
+        <button class="nav-item" data-view="help"><i data-icon="help"></i><span data-i18n="nav.help">Help</span></button>
+      </nav>
+      <div class="side-foot">
+        <span class="lic-pill" id="side-tier">FREE</span>
+        <span class="ver">v1.2.0</span>
+      </div>
+    </aside>
 
-  <footer>Nexus Fleet · for personal / ethical hacking study only · data tetap di LAN Anda</footer>
+    <!-- ============ Main ============ -->
+    <div class="content">
+      <!-- Topbar -->
+      <header class="topbar">
+        <div class="conn">
+          <span class="conn-status" id="conn-status"><i data-icon="offline"></i><span id="conn-label" data-i18n="conn.offline">Disconnected</span></span>
+          <input id="host" data-i18n-ph="conn.host" value="127.0.0.1" />
+          <input id="port" data-i18n-ph="conn.port" value="8765" class="port" />
+          <input id="token" data-i18n-ph="conn.token" type="password" />
+          <button id="connect" class="btn-primary"><i data-icon="plug" data-size="16"></i><span data-i18n="conn.connect">Connect</span></button>
+        </div>
+        <div class="topbar-actions">
+          <button id="refresh-all" class="icon-btn" data-i18n-title="nav.overview"><i data-icon="refresh" data-size="18"></i></button>
+          <button id="lang-toggle" class="icon-btn lang"><i data-icon="language" data-size="18"></i><span id="lang-label">ID</span></button>
+          <button id="theme-toggle" class="icon-btn"><i data-icon="moon" data-size="18"></i></button>
+        </div>
+      </header>
+
+      <main class="views" id="views">
+        <!-- ===== Overview ===== -->
+        <section class="view active" data-view="overview">
+          <div class="banner">
+            <div class="banner-ic"><i data-icon="overview" data-size="22"></i></div>
+            <div><h3 data-i18n="ov.welcome.title">Welcome</h3><p data-i18n="ov.welcome.body"></p></div>
+          </div>
+          <div class="cards">
+            <div class="stat"><div class="stat-num" id="s-agents">0</div><div class="stat-lbl" data-i18n="card.agents">Agents</div></div>
+            <div class="stat"><div class="stat-num ok" id="s-online">0</div><div class="stat-lbl" data-i18n="card.online">Online</div></div>
+            <div class="stat"><div class="stat-num" id="s-events">0</div><div class="stat-lbl" data-i18n="card.events">Events</div></div>
+            <div class="stat"><div class="stat-num crit" id="s-open">0</div><div class="stat-lbl" data-i18n="card.open">Open alerts</div></div>
+            <div class="stat"><div class="stat-num crit" id="s-risk">0</div><div class="stat-lbl" data-i18n="card.risk">Risk score</div></div>
+          </div>
+          <div class="row">
+            <div class="panel seat-panel">
+              <h2 data-i18n="ov.seats.title">Seat usage</h2>
+              <div class="seatbar"><div class="seatbar-fill" id="seatbar-fill"></div></div>
+              <div class="seat-meta"><span id="seat-text">0 / 0</span><span class="lic-pill" id="seat-tier">FREE</span></div>
+            </div>
+            <div class="panel">
+              <h2 data-i18n="ov.recent">Recent alerts</h2>
+              <table class="tbl" id="recent-alerts"><tbody></tbody></table>
+              <p class="empty" id="recent-empty" data-i18n="alerts.empty">No alerts.</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== Agents ===== -->
+        <section class="view" data-view="agents">
+          <div class="view-head"><h1 data-i18n="agents.title">Agents</h1><p class="hint" data-i18n="agents.hint"></p></div>
+          <div class="panel">
+            <table class="tbl" id="agents"><thead><tr>
+              <th data-i18n="agents.col.name">Name</th><th data-i18n="agents.col.host">Host / OS</th>
+              <th data-i18n="agents.col.ip">IP</th><th data-i18n="agents.col.status">Status</th>
+              <th data-i18n="agents.col.seen">Last seen</th><th></th>
+            </tr></thead><tbody></tbody></table>
+            <p class="empty" id="agents-empty" data-i18n="agents.empty"></p>
+          </div>
+        </section>
+
+        <!-- ===== Alerts ===== -->
+        <section class="view" data-view="alerts">
+          <div class="view-head"><h1 data-i18n="alerts.title">Alerts</h1><p class="hint" data-i18n="alerts.hint"></p></div>
+          <div class="panel">
+            <div class="filters">
+              <select id="astatus"><option value="" data-i18n="alerts.all">all</option>
+                <option value="open">open</option><option value="ack">ack</option><option value="resolved">resolved</option></select>
+            </div>
+            <table class="tbl" id="alerts"><thead><tr>
+              <th data-i18n="alerts.col.time">Time</th><th data-i18n="alerts.col.lvl">Lvl</th>
+              <th data-i18n="alerts.col.sev">Severity</th><th data-i18n="alerts.col.rule">Rule</th>
+              <th data-i18n="alerts.col.title">Title</th><th>MITRE</th>
+              <th data-i18n="alerts.col.agent">Agent</th><th data-i18n="alerts.col.status">Status</th>
+            </tr></thead><tbody></tbody></table>
+            <p class="empty" id="alerts-empty" data-i18n="alerts.empty"></p>
+          </div>
+        </section>
+
+        <!-- ===== Events ===== -->
+        <section class="view" data-view="events">
+          <div class="view-head"><h1 data-i18n="events.title">Events</h1><p class="hint" data-i18n="events.hint"></p></div>
+          <div class="panel">
+            <div class="filters">
+              <select id="sev"><option value="" data-i18n="events.all">all</option>
+                <option>critical</option><option>high</option><option>medium</option><option>low</option><option>info</option></select>
+            </div>
+            <table class="tbl" id="events"><thead><tr>
+              <th data-i18n="alerts.col.time">Time</th><th data-i18n="alerts.col.sev">Severity</th>
+              <th data-i18n="events.col.type">Type</th><th data-i18n="alerts.col.title">Title</th>
+              <th data-i18n="alerts.col.agent">Agent</th>
+            </tr></thead><tbody></tbody></table>
+            <p class="empty" id="events-empty" data-i18n="events.empty"></p>
+          </div>
+        </section>
+
+        <!-- ===== Incidents ===== -->
+        <section class="view" data-view="incidents">
+          <div class="view-head"><h1 data-i18n="inc.title">Incidents</h1><p class="hint" data-i18n="inc.hint"></p></div>
+          <div class="panel">
+            <table class="tbl" id="incidents"><thead><tr>
+              <th data-i18n="inc.col.key">Incident</th><th data-i18n="inc.col.count">Alerts</th>
+              <th data-i18n="inc.col.sev">Top severity</th><th data-i18n="inc.col.agents">Agents</th>
+              <th data-i18n="inc.col.last">Last</th>
+            </tr></thead><tbody></tbody></table>
+            <p class="empty" id="incidents-empty" data-i18n="inc.empty"></p>
+          </div>
+        </section>
+
+        <!-- ===== Policy ===== -->
+        <section class="view" data-view="policy">
+          <div class="view-head"><h1 data-i18n="pol.title">Policy</h1><p class="hint" data-i18n="pol.hint"></p></div>
+          <div class="panel">
+            <textarea id="policy-json" spellcheck="false" rows="20"></textarea>
+            <div class="actions">
+              <button id="policy-save" class="btn-primary"><i data-icon="save" data-size="16"></i><span data-i18n="pol.save">Save</span></button>
+              <span class="msg" id="policy-msg"></span>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== License ===== -->
+        <section class="view" data-view="license">
+          <div class="view-head"><h1 data-i18n="lic.title">License</h1><p class="hint" data-i18n="lic.hint"></p></div>
+          <div class="panel lic-card">
+            <div class="lic-grid">
+              <div class="lic-row"><span data-i18n="lic.tier">Tier</span><b id="lic-tier" class="lic-pill">—</b></div>
+              <div class="lic-row"><span data-i18n="lic.valid">Valid</span><b id="lic-valid">—</b></div>
+              <div class="lic-row"><span data-i18n="lic.licensee">Licensee</span><b id="lic-licensee">—</b></div>
+              <div class="lic-row"><span data-i18n="lic.seats">Seats</span><b id="lic-seats">—</b></div>
+              <div class="lic-row"><span data-i18n="lic.expires">Expires</span><b id="lic-expires">—</b></div>
+              <div class="lic-row feats"><span data-i18n="lic.features">Features</span><div id="lic-features" class="chips"></div></div>
+            </div>
+            <p class="lic-note" id="lic-note"></p>
+          </div>
+        </section>
+
+        <!-- ===== Help ===== -->
+        <section class="view" data-view="help">
+          <div class="view-head"><h1 data-i18n="help.title">Help</h1></div>
+          <div class="panel help" id="help-body"></div>
+        </section>
+      </main>
+      <footer class="foot">Nexus Fleet · ethical-use only · your data stays on your LAN · © 2026 Nexus Security</footer>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="icons.js"></script>
+  <script src="i18n.js"></script>
+  <script src="help.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

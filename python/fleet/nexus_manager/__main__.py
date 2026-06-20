@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nexus_manager import server  # noqa: E402
 from nexus_common import protocol as fc  # noqa: E402
+from nexus_common import __version__  # noqa: E402
 
 
 def _gen_self_signed(cert, key, cn):
@@ -94,6 +95,7 @@ def _gen_self_signed(cert, key, cn):
 def main(argv=None):
     p = argparse.ArgumentParser(prog="nexus-manager",
                                 description="Server pusat Nexus Fleet (penerima event & policy).")
+    p.add_argument("-V", "--version", action="version", version=f"nexus-manager {__version__}")
     sub = p.add_subparsers(dest="action", required=True)
     r = sub.add_parser("run", help="jalankan server (blocking)")
     r.add_argument("--host", default="0.0.0.0")

@@ -94,6 +94,8 @@ export const router = createHashRouter([
           { path: "scan-diff", element: <ScanDiff /> },
           { path: "defense-monitor", element: <DefenseMonitor /> },
           { path: "defense-suite", element: <DefenseSuite /> },
+          { path: "nexus-agents", element: <NexusAgents /> },
+          { path: "human-element", element: <HumanElement /> },
           { path: "waf", element: <WAF /> },
           { path: "report", element: <ReportGenerator /> },
           { path: "scheduler", element: <Scheduler /> },
