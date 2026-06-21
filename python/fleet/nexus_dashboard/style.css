@@ -163,3 +163,43 @@ textarea{width:100%;font-family:ui-monospace,"Geist Mono",Consolas,monospace;lin
   .cards{grid-template-columns:repeat(2,1fr)}.conn input#token,.conn input{width:120px}
   .lic-grid{grid-template-columns:1fr}
 }
+
+/* ====== SecOps views (sharp corners diwarisi dari * border-radius:0) ====== */
+.nav-sep{padding:14px 12px 5px;font-size:9px;text-transform:uppercase;letter-spacing:2px;
+  color:var(--subtle);font-weight:700}
+.searchbar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.searchbar input{flex:1;min-width:160px;background:var(--panel2);border:1px solid var(--hair);
+  color:var(--text);padding:9px 11px;font-size:13px;font-family:ui-monospace,monospace}
+.searchbar select{background:var(--panel2);border:1px solid var(--hair);color:var(--text);padding:9px 10px}
+.se-meta{margin:0 0 10px}
+.btn-ghost{display:inline-flex;align-items:center;gap:6px;background:transparent;color:var(--muted);
+  border:1px solid var(--hair2);padding:7px 12px;font-size:12px;font-weight:600;cursor:pointer}
+.btn-ghost:hover{background:var(--panel2);color:var(--text)}
+.icon-btn[data-icon],.searchbar .icon-btn{background:var(--panel2);border:1px solid var(--hair);
+  color:var(--muted);padding:8px;cursor:pointer}
+.icon-btn:hover{color:var(--text)}
+/* pohon proses EDR */
+.tree{font-family:ui-monospace,monospace;font-size:12.5px;line-height:1.5;overflow:auto;max-height:62vh}
+.tree ul{list-style:none;margin:0;padding-left:18px;border-left:1px dashed var(--hair2)}
+.tree>ul{padding-left:0;border:0}
+.tree li{padding:2px 0}
+.tree .pname{color:var(--text);font-weight:600}
+.tree .ppid{color:var(--subtle);font-size:11px}
+.tree .pcmd{color:var(--muted);font-size:11px}
+.tree .risk>.pname{color:var(--crit)}
+.tree .risk-tag{color:var(--crit);font-size:10px;font-weight:700;margin-left:6px;text-transform:uppercase}
+/* kartu triase AI */
+.triage-list{display:flex;flex-direction:column;gap:10px}
+.tcard{border:1px solid var(--hair);background:var(--panel2);padding:12px 14px;border-left:3px solid var(--hair2)}
+.tcard.P1{border-left-color:var(--crit)}.tcard.P2{border-left-color:var(--high)}.tcard.P3{border-left-color:var(--low)}
+.tcard-head{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.pri{font-weight:800;font-size:11px;letter-spacing:1px;padding:2px 8px;border:1px solid currentColor}
+.pri.P1{color:var(--crit)}.pri.P2{color:var(--high)}.pri.P3{color:var(--low)}
+.tcard-sum{font-size:12.5px;color:var(--text);line-height:1.55}
+.tcard-recs{margin:8px 0 0;padding-left:18px;color:var(--muted);font-size:12px}
+.tcard-meta{color:var(--subtle);font-size:11px;margin-left:auto}
+.detail-box{margin-top:14px;border:1px solid var(--hair);background:var(--panel2);padding:14px}
+.detail-box .step{padding:4px 0;border-bottom:1px solid var(--hair);font-size:12.5px}
+.pill{font-size:10px;font-weight:700;padding:2px 7px;border:1px solid var(--hair2);color:var(--muted)}
+.pill.dry_run{color:var(--med)}.pill.active{color:var(--ok)}
+.pill.on{color:var(--ok)}.pill.off{color:var(--subtle)}

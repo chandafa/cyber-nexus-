@@ -13,7 +13,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nexus-fleet"
-version = "1.2.1"
+version = "2.0.0"
 description = "Nexus Fleet — agent/manager/cli/dashboard keamanan endpoint (ala-Wazuh, ringan, stdlib-only)"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -48,7 +48,7 @@ nexus-license = "nexus_license.__main__:main"
 
 [tool.setuptools]
 packages = ["nexus_common", "nexus_manager", "nexus_agent", "nexus_cli",
-            "nexus_dashboard", "nexus_license"]
+            "nexus_dashboard", "nexus_license", "nexus_secops"]
 
 [tool.setuptools.package-data]
 nexus_dashboard = ["*.html", "*.css", "*.js"]

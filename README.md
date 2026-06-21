@@ -5,6 +5,7 @@
 **A unified, developer-first security platform — desktop toolkit + distributed agent/manager fleet.**
 
 Scanning · Vulnerability Assessment · File Integrity · Log Monitoring · Defense · Reporting
+**SIEM · XDR · EDR · UEBA · SOAR · Threat Intel · NDR · Cloud Security · Local AI Triage**
 
 [![PyPI](https://img.shields.io/pypi/v/nexus-fleet?logo=pypi&logoColor=white&label=nexus-fleet)](https://pypi.org/project/nexus-fleet/)
 [![npm](https://img.shields.io/npm/v/nexus-fleet?logo=npm)](https://www.npmjs.com/package/nexus-fleet)
@@ -29,8 +30,31 @@ Nexus has two complementary products in one platform:
 | --- | --- | --- |
 | **Nexus Desktop** | A cross-platform desktop app (Tauri + React) that orchestrates 20+ security tools with a clean, VS Code–style UI, live terminal, reporting, and history. | Hands-on assessment & analysis from a single workstation. |
 | **Nexus Fleet** | A Wazuh-style distributed platform — **agent · manager · CLI · dashboard** — for continuously monitoring many endpoints. Published as [`nexus-fleet`](https://pypi.org/project/nexus-fleet/) on PyPI & npm. | Continuous monitoring, detection & response across servers and endpoints. |
+| **Nexus SecOps** | A full **SOC brain** layered on the Fleet data pipe (one install, modules inside — the Wazuh/Elastic model): SIEM · XDR · EDR · UEBA · SOAR · Threat Intel · NDR · Cloud Security · a **local AI** triage engine (no API/token). | Detect, correlate, hunt, and auto-respond across a fleet from one dashboard. |
 
 Both are **offline-first**: your security data stays inside your own network.
+
+### Nexus SecOps — 9 SOC capabilities, one platform
+
+Consolidates the de-duplicated capabilities of 20 enterprise tools (Splunk, Elastic, QRadar,
+CrowdStrike, SentinelOne, Defender XDR, Cortex XDR, Securonix, Security Onion, Wazuh, …) into
+9 modules inside `nexus-fleet` — **no extra install, no second agent, no external API**:
+
+| Pillar | What it does | Best-of |
+| --- | --- | --- |
+| **SIEM** | NQL search + aggregations over the real event/alert store | Splunk/Elastic/QRadar/Graylog |
+| **XDR** | Fuse many alerts across time into one kill-chain incident | Defender XDR / Cortex XDR |
+| **EDR** | Real process tree (pid/ppid) + suspicious-lineage detection | CrowdStrike Falcon / SentinelOne |
+| **UEBA** | Per-entity behavioral baselines + anomaly scoring + peer analysis | Securonix / Exabeam |
+| **SOAR** | Playbooks → real active-response (block/isolate/kill), dry-run-safe | Cortex XSOAR / Google SecOps |
+| **Threat Intel** | IOC store + match on real telemetry + feed import (abuse.ch/MISP/OTX) | MISP / OTX |
+| **NDR** | Beaconing/C2, port-scan & IOC-destination detection from connection flows | Security Onion / Zeek + QRadar QFlow |
+| **Cloud** | CSPM — evaluate cloud config vs CIS + import Prowler | Cortex / Defender for Cloud |
+| **AI Triage** | **Local** Naive-Bayes + heuristic triage, kill-chain NLG, NL→query — **$0 token** | Security Copilot / Charlotte (local) |
+
+All pillars feed each other (detection → correlation → UEBA → threat-intel → AI triage → auto-response)
+and operate on **real data only** — never demo. Architecture & data flow: see
+[`python/fleet/ARCHITECTURE.md`](./python/fleet/ARCHITECTURE.md).
 
 ## Highlights
 
@@ -39,6 +63,9 @@ Both are **offline-first**: your security data stays inside your own network.
   weak DB credentials, leaked `NEXT_PUBLIC_*` secrets, Nginx/Laravel log analysis.
 - **Wazuh-parity Fleet**: FIM, Log Monitoring, SCA, Software/Process/Network inventory,
   **Vulnerability Detection (inventory ↔ CVE)**, rule & alert engine (MITRE ATT&CK), Active Response.
+- **Nexus SecOps (SOC brain)**: SIEM search, XDR correlation, EDR process trees, UEBA, SOAR
+  playbooks, Threat Intel, NDR, Cloud CSPM, and a **local AI** triage engine — all stdlib-only,
+  no external API, no token cost.
 - **One-line install** for the Fleet: `pip install nexus-fleet` or `npm install -g nexus-fleet`.
 - **Security posture score** (0–100) for network, server, and website.
 
@@ -73,6 +100,12 @@ sslyze, Trivy, ...                        └───────────�
                                           │ FIM · logs · SCA · vuln  │
                                           │ syscollector · response  │
                                           └──────────────────────────┘
+
+  nexus-secops (SOC brain — reads the manager's event/alert store, no new agent)
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │ SIEM(siem) · XDR(correlate) · EDR(edr) · UEBA(ueba) · SOAR(soar)          │
+  │ Threat-Intel(threatintel) · NDR(ndr) · Cloud-CSPM(cloud) · AI(ai, local)  │
+  └──────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Requirements
@@ -108,7 +141,7 @@ Pro/Enterprise token unlocks both the desktop app and the CLI on the **same devi
 
 ```bash
 pip install nexus-fleet          # or: npm install -g nexus-fleet
-nexus --version                  # verify install (prints: nexus 1.2.1)
+nexus --version                  # verify install (prints: nexus 2.0.0)
 
 nexus manager run --host 0.0.0.0 --port 8765   # server + dashboard at :8765/
 nexus manager info                              # show enrollment key & admin token
@@ -151,7 +184,9 @@ nexus/
 ├── python/
 │   ├── runner.py   # CLI dispatcher invoked by Rust
 │   ├── core/ · modules/ · report/      # engine + 20+ security modules
-│   └── fleet/      # Nexus Fleet packages (nexus_manager/agent/cli/dashboard/common/license)
+│   └── fleet/      # Nexus Fleet + SecOps packages:
+│        nexus_manager/agent/cli/dashboard/common/license
+│        nexus_secops/  (siem · correlate · soar · threatintel · ueba · ai · edr · cloud · ndr)
 ├── docs/           # PRODUCT-BRIEF.md, IP-PROTECTION.md
 └── .github/workflows/   # CI: desktop release + fleet publish (PyPI/npm)
 ```
@@ -163,6 +198,7 @@ nexus/
 | Agents | 2 | seat-based | Unlimited |
 | Detection rules | Core | Full | Full |
 | Sigma · Active Response · Web audit | — | ✓ | ✓ |
+| SecOps premium (Threat Intel match · CSPM · advanced rules) | Core | ✓ | ✓ |
 
 Pro/Enterprise features are unlocked by Ed25519-signed license tokens. Contact the vendor for licensing.
 
