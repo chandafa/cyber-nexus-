@@ -30,6 +30,16 @@ export const PRO_ROUTES: string[] = [
   "/fleet-manager",
   "/fleet-agent",
   "/scheduler",
+  // SecOps (Pro) — 9 pilar SOC
+  "/siem-search",
+  "/xdr",
+  "/edr",
+  "/ueba",
+  "/soar",
+  "/threat-intel",
+  "/ndr",
+  "/cloud-cspm",
+  "/ai-triage",
 ];
 
 const PRO_SET = new Set(PRO_ROUTES);

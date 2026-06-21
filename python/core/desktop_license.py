@@ -96,6 +96,20 @@ PRO_COMMANDS = {
     "agent_start": "*",
     # Scheduler
     "scheduler": "*",
+    # SecOps (9 pilar SOC) — semua butuh lisensi Pro.
+    "secops_search": "*", "secops_stats": "*", "secops_explain": "*",
+    "xdr_correlate": "*", "xdr_incidents": "*", "xdr_incident": "*", "xdr_ack": "*",
+    "soar_playbooks": "*", "soar_save": "*", "soar_enable": "*", "soar_mode": "*",
+    "soar_delete": "*", "soar_runs": "*", "soar_run": "*", "soar_process": "*",
+    "ti_iocs": "*", "ti_add": "*", "ti_import": "*", "ti_delete": "*", "ti_clear": "*",
+    "ti_matches": "*", "ti_stats": "*", "ti_scan": "*",
+    "ueba_train": "*", "ueba_scan": "*", "ueba_baselines": "*", "ueba_scores": "*",
+    "ueba_peers": "*",
+    "ai_train": "*", "ai_triage": "*", "ai_list": "*", "ai_incident": "*",
+    "ai_nl": "*", "ai_status": "*",
+    "edr_hosts": "*", "edr_tree": "*", "edr_processes": "*", "edr_ancestry": "*",
+    "cloud_scan": "*", "cloud_findings": "*", "cloud_posture": "*", "cloud_stats": "*",
+    "ndr_flows": "*", "ndr_talkers": "*", "ndr_stats": "*",
 }
 
 # Label fitur (untuk pesan & UI).

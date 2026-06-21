@@ -946,6 +946,14 @@ _CORS = {
 _STATIC = {".html": "text/html; charset=utf-8", ".js": "application/javascript",
            ".css": "text/css", ".svg": "image/svg+xml", ".ico": "image/x-icon"}
 
+# Path API SecOps (semua butuh lisensi Pro/Enterprise — fitur 'secops').
+_SECOPS_PREFIXES = ("/search", "/siem", "/xdr", "/ai", "/edr", "/ueba", "/ti",
+                    "/cloud", "/ndr", "/soar")
+
+
+def _is_secops_path(path):
+    return any(path == p or path.startswith(p + "/") for p in _SECOPS_PREFIXES)
+
 
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -1069,6 +1077,10 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/vulndb":
             r = set_vulndb(body.get("vuln_db", body))
             return self._send(200 if r.get("ok") else 400, r)
+        # Gerbang lisensi SecOps (Pro/Enterprise) untuk seluruh aksi tulis SecOps.
+        if _is_secops_path(path) and not licensing.has(ent(), "secops"):
+            return self._send(403, {"error": "Fitur SecOps butuh lisensi Pro/Enterprise.",
+                                    "feature": "secops"})
         if path == "/xdr/ack":
             from nexus_secops import correlate as xdr
             r = xdr.ack_incident(body.get("id", ""), body.get("status", "ack"))
@@ -1176,6 +1188,10 @@ class _Handler(BaseHTTPRequestHandler):
             return (q.get(name, [default]) or [default])[0]
 
         # --- Nexus SecOps: SIEM search + XDR incidents (lapisan analitik) ---
+        # Gerbang lisensi: seluruh SecOps butuh fitur 'secops' (Pro/Enterprise).
+        if _is_secops_path(path) and not licensing.has(ent(), "secops"):
+            return self._send(403, {"error": "Fitur SecOps butuh lisensi Pro/Enterprise.",
+                                    "feature": "secops"})
         if path == "/search":
             from nexus_secops import siem
             return self._send(200, siem.search(_q("index", "events"), _q("q", ""),

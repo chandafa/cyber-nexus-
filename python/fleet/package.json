@@ -1,13 +1,14 @@
 {
   "name": "nexus-fleet",
-  "version": "1.2.1",
-  "description": "Nexus Fleet — agent/manager/cli/dashboard keamanan endpoint (ala-Wazuh, ringan). npm membungkus engine Python stdlib-only.",
-  "keywords": ["security", "soc", "edr", "agent", "manager", "monitoring", "wazuh", "fleet", "cli"],
+  "version": "2.1.0",
+  "description": "Nexus Fleet + SecOps — agent/manager/cli/dashboard + SOC brain (SIEM·XDR·EDR·UEBA·SOAR·Threat-Intel·NDR·Cloud·local-AI). npm membungkus engine Python stdlib-only.",
+  "keywords": ["security", "soc", "edr", "xdr", "siem", "soar", "ueba", "ndr", "cspm", "threat-intelligence", "agent", "manager", "monitoring", "wazuh", "fleet", "cli"],
   "author": "chandafa (Nexus Security) <ck271138@gmail.com>",
   "license": "SEE LICENSE IN LICENSE",
   "copyright": "Copyright (c) 2026 chandafa (Nexus Security). All rights reserved.",
   "engines": { "node": ">=14" },
   "bin": {
+    "nexus": "bin/nexus.js",
     "nexus-manager": "bin/nexus-manager.js",
     "nexus-agent": "bin/nexus-agent.js",
     "nexus-cli": "bin/nexus-cli.js",
@@ -22,6 +23,7 @@
     "nexus_cli/",
     "nexus_dashboard/",
     "nexus_license/",
+    "nexus_secops/",
     "README.md",
     "LICENSE"
   ],
