@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# NEXUS — Copyright (c) 2026 chandafa (Nexus Security). All rights reserved.
+# Part of the Nexus security platform. Proprietary and confidential.
+# Unauthorized copying, modification, or distribution is prohibited.
+# This notice and embedded metadata must not be removed. See LICENSE / NOTICE.
+# Contact: ck271138@gmail.com
+
 # nexus/python/runner.py
 """
 Central CLI dispatcher untuk Nexus Python engine.
@@ -70,6 +76,37 @@ def _parse_kwargs(argv):
 
 
 def dispatch(command: str, kwargs: dict) -> dict:
+    # -------------------------------------------------- lisensi (status & gerbang Pro)
+    # Gerbang lisensi desktop: modul GUI Pro tidak melewati gerbang manager, jadi
+    # dijaga di sini — tolak SEBELUM eksekusi bila edisi tak berhak. desktop_license
+    # menentukan command mana yang Pro (lihat PRO_COMMANDS); command Free dilewati.
+    try:
+        from core import desktop_license
+    except Exception as _lic_ex:
+        desktop_license = None
+        if command in ('license_status', 'license_apply', 'license_clear'):
+            return {"module": "license", "ok": False, "error": f"Modul lisensi gagal: {_lic_ex}"}
+
+    if desktop_license is not None:
+        if command == 'license_status':
+            return desktop_license.status()
+        if command == 'license_device_id':
+            return {"module": "license", "device_id": desktop_license.device_id(),
+                    "api_configured": bool(desktop_license.api_base())}
+        if command == 'license_redeem':
+            return desktop_license.redeem(kwargs.get('code', ''))
+        if command == 'license_validate':
+            return desktop_license.validate()
+        if command == 'license_apply':
+            return desktop_license.apply(kwargs.get('token', '') or kwargs.get('path', ''))
+        if command == 'license_clear':
+            return desktop_license.clear()
+
+        _locked = desktop_license.guard(command)
+        if _locked is not None:
+            emit_line(f"[LISENSI] {_locked['error']}")
+            return _locked
+
     # -------------------------------------------------- info / utility
     if command == 'check_deps':
         from core.dependency_checker import run_all_checks
@@ -267,6 +304,10 @@ def dispatch(command: str, kwargs: dict) -> dict:
         from modules import scheduler
         return scheduler.run(**kwargs)
 
+    if command == 'human_element':
+        from modules import human_element
+        return human_element.run(**kwargs)
+
     if command == 'wordlist':
         from modules import wordlist_manager
         return wordlist_manager.run(kwargs.get('submode', 'list'), kwargs.get('name', ''))
@@ -402,6 +443,198 @@ def dispatch(command: str, kwargs: dict) -> dict:
         from modules import fleet_manager
         return fleet_manager.incidents(kwargs.get('status', 'open'))
 
+    # -------------------------------------------------- Nexus SecOps (SIEM + XDR)
+    # Lapisan analitik SOC di atas store NYATA manager (events/alerts). Bukan demo.
+    if command == 'secops_search':
+        from modules import secops
+        return secops.search(kwargs.get('index', 'events'), kwargs.get('q', ''),
+                             int(kwargs.get('limit', 200)), kwargs.get('order', 'desc'))
+
+    if command == 'secops_stats':
+        from modules import secops
+        return secops.stats(kwargs.get('index', 'events'), kwargs.get('q', ''),
+                            int(kwargs.get('buckets', 24)),
+                            kwargs.get('top_field', 'event_type'),
+                            int(kwargs.get('top_n', 10)))
+
+    if command == 'secops_explain':
+        from modules import secops
+        return secops.explain(kwargs.get('q', ''))
+
+    if command == 'xdr_correlate':
+        from modules import secops
+        return secops.correlate(int(kwargs.get('lookback', 86400)))
+
+    if command == 'xdr_incidents':
+        from modules import secops
+        return secops.incidents(kwargs.get('status', ''), int(kwargs.get('limit', 200)))
+
+    if command == 'xdr_incident':
+        from modules import secops
+        return secops.incident(kwargs.get('id', ''))
+
+    if command == 'xdr_ack':
+        from modules import secops
+        return secops.ack_incident(kwargs.get('id', ''), kwargs.get('status', 'ack'))
+
+    if command == 'soar_playbooks':
+        from modules import secops
+        return secops.soar_playbooks()
+
+    if command == 'soar_save':
+        from modules import secops
+        return secops.soar_save(kwargs.get('playbook', '{}'))
+
+    if command == 'soar_enable':
+        from modules import secops
+        return secops.soar_enable(kwargs.get('id', ''), kwargs.get('enabled', 'true'))
+
+    if command == 'soar_mode':
+        from modules import secops
+        return secops.soar_mode(kwargs.get('id', ''), kwargs.get('mode', 'dry_run'))
+
+    if command == 'soar_delete':
+        from modules import secops
+        return secops.soar_delete(kwargs.get('id', ''))
+
+    if command == 'soar_runs':
+        from modules import secops
+        return secops.soar_runs(int(kwargs.get('limit', 200)))
+
+    if command == 'soar_run':
+        from modules import secops
+        return secops.soar_run(kwargs.get('id', ''), kwargs.get('ref_id', ''))
+
+    if command == 'soar_process':
+        from modules import secops
+        return secops.soar_process(int(kwargs.get('lookback', 21600)))
+
+    if command == 'ti_iocs':
+        from modules import secops
+        return secops.ti_iocs(kwargs.get('type', ''), kwargs.get('q', ''),
+                              int(kwargs.get('limit', 500)))
+
+    if command == 'ti_add':
+        from modules import secops
+        return secops.ti_add(kwargs.get('iocs', '[]'), kwargs.get('source', 'manual'))
+
+    if command == 'ti_import':
+        from modules import secops
+        return secops.ti_import(kwargs.get('url', ''), kwargs.get('fmt', 'text'),
+                                kwargs.get('source'), kwargs.get('threat', 'feed'),
+                                kwargs.get('severity', 'high'), int(kwargs.get('col', 0)))
+
+    if command == 'ti_delete':
+        from modules import secops
+        return secops.ti_delete(kwargs.get('id', ''))
+
+    if command == 'ti_clear':
+        from modules import secops
+        return secops.ti_clear()
+
+    if command == 'ti_matches':
+        from modules import secops
+        return secops.ti_matches(int(kwargs.get('limit', 200)))
+
+    if command == 'ti_stats':
+        from modules import secops
+        return secops.ti_stats()
+
+    if command == 'ti_scan':
+        from modules import secops
+        return secops.ti_scan(int(kwargs.get('lookback', 604800)))
+
+    if command == 'ueba_train':
+        from modules import secops
+        return secops.ueba_train(int(kwargs.get('lookback', 1209600)))
+
+    if command == 'ueba_scan':
+        from modules import secops
+        return secops.ueba_scan(int(kwargs.get('window', 86400)),
+                                kwargs.get('emit', 'true'))
+
+    if command == 'ueba_baselines':
+        from modules import secops
+        return secops.ueba_baselines()
+
+    if command == 'ueba_scores':
+        from modules import secops
+        return secops.ueba_scores(int(kwargs.get('limit', 200)), kwargs.get('band', ''))
+
+    if command == 'ueba_peers':
+        from modules import secops
+        return secops.ueba_peers(int(kwargs.get('window', 86400)))
+
+    if command == 'ai_train':
+        from modules import secops
+        return secops.ai_train()
+
+    if command == 'ai_triage':
+        from modules import secops
+        return secops.ai_triage(kwargs.get('id', ''), kwargs.get('status', 'open'))
+
+    if command == 'ai_list':
+        from modules import secops
+        return secops.ai_list(kwargs.get('priority', ''))
+
+    if command == 'ai_incident':
+        from modules import secops
+        return secops.ai_incident(kwargs.get('id', ''))
+
+    if command == 'ai_nl':
+        from modules import secops
+        return secops.ai_nl(kwargs.get('q', ''))
+
+    if command == 'ai_status':
+        from modules import secops
+        return secops.ai_status()
+
+    if command == 'edr_hosts':
+        from modules import secops
+        return secops.edr_hosts()
+
+    if command == 'edr_tree':
+        from modules import secops
+        return secops.edr_tree(kwargs.get('agent_id', ''))
+
+    if command == 'edr_processes':
+        from modules import secops
+        return secops.edr_processes(kwargs.get('agent_id', ''), kwargs.get('q', ''))
+
+    if command == 'edr_ancestry':
+        from modules import secops
+        return secops.edr_ancestry(kwargs.get('agent_id', ''), int(kwargs.get('pid', 0)))
+
+    if command == 'cloud_scan':
+        from modules import secops
+        return secops.cloud_scan(kwargs.get('resources'), kwargs.get('prowler'),
+                                 kwargs.get('provider', 'aws'), kwargs.get('account', 'default'))
+
+    if command == 'cloud_findings':
+        from modules import secops
+        return secops.cloud_findings(kwargs.get('provider', ''), kwargs.get('severity', ''),
+                                     kwargs.get('status', ''))
+
+    if command == 'cloud_posture':
+        from modules import secops
+        return secops.cloud_posture()
+
+    if command == 'cloud_stats':
+        from modules import secops
+        return secops.cloud_stats()
+
+    if command == 'ndr_flows':
+        from modules import secops
+        return secops.ndr_flows(kwargs.get('agent_id', ''), int(kwargs.get('limit', 500)))
+
+    if command == 'ndr_talkers':
+        from modules import secops
+        return secops.ndr_talkers(int(kwargs.get('window', 86400)))
+
+    if command == 'ndr_stats':
+        from modules import secops
+        return secops.ndr_stats()
+
     if command == 'fleet_add_user':
         from modules import fleet_manager
         return fleet_manager.add_user(kwargs.get('role', 'viewer'))
@@ -535,6 +768,14 @@ def main():
         from core.wsl_backend import get_no_demo
         if get_no_demo():
             os.environ['NEXUS_NO_DEMO'] = '1'
+    except Exception:
+        pass
+
+    # Lisensi desktop → env NEXUS_LICENSE agar manager tertanam ikut terbuka
+    # oleh key yang sama (satu key untuk modul desktop + fleet).
+    try:
+        from core import desktop_license
+        desktop_license.bootstrap_env()
     except Exception:
         pass
 

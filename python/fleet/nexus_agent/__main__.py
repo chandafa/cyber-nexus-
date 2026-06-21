@@ -1,3 +1,9 @@
+# NEXUS — Copyright (c) 2026 chandafa (Nexus Security). All rights reserved.
+# Part of the Nexus security platform. Proprietary and confidential.
+# Unauthorized copying, modification, or distribution is prohibited.
+# This notice and embedded metadata must not be removed. See LICENSE / NOTICE.
+# Contact: ck271138@gmail.com
+
 # nexus_agent/__main__.py
 """
 nexus-agent — entrypoint standalone (daemon endpoint ringan).
@@ -20,11 +26,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nexus_agent import agent  # noqa: E402
 from nexus_common import protocol as fc  # noqa: E402
+from nexus_common import __version__  # noqa: E402
 
 
 def main(argv=None):
     p = argparse.ArgumentParser(prog="nexus-agent",
                                 description="Daemon endpoint Nexus Fleet (ala-Wazuh agent).")
+    p.add_argument("-V", "--version", action="version", version=f"nexus-agent {__version__}")
     sub = p.add_subparsers(dest="action", required=True)
     e = sub.add_parser("enroll", help="daftar ke manager")
     e.add_argument("--host", required=True)

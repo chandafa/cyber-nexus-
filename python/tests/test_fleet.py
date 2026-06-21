@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# NEXUS — Copyright (c) 2026 chandafa (Nexus Security). All rights reserved.
+# Part of the Nexus security platform. Proprietary and confidential.
+# Unauthorized copying, modification, or distribution is prohibited.
+# This notice and embedded metadata must not be removed. See LICENSE / NOTICE.
+# Contact: ck271138@gmail.com
+
 """End-to-end test subsistem Fleet: manager <-> agent (HTTP + HMAC + queue)."""
 import os
 import sys
@@ -263,7 +269,11 @@ def main():
     print("== 25d. Syscollector (proses/jaringan) + suspicious process ==")
     from nexus_agent import collectors as C2
     pe = C2.c_processes({})
-    check("process inventory (process_list)", any(e["event_type"] == "process_list" for e in pe))
+    # Snapshot proses kini membawa pid/ppid (untuk pohon proses EDR), event_type baru.
+    check("process inventory (process_snapshot)",
+          any(e["event_type"] == "process_snapshot" for e in pe))
+    check("snapshot membawa detail pid/ppid (EDR)",
+          any(isinstance((e.get("data") or {}).get("processes"), list) for e in pe))
     ne = C2.c_network({})
     check("network inventory", ne[0]["event_type"] == "network_inventory")
     ingest([{"type": "processes", "severity": "high", "event_type": "suspicious_process",
@@ -416,6 +426,17 @@ def main():
     pro_tok = lic.issue(_SEED, "HotReload", tier="pro", days=365, max_agents=5)
     ra = mgr.apply_license(pro_tok)
     check("apply_license hot-reload -> pro", ra.get("ok") and ra.get("tier") == "pro")
+    # Regresi: token PRO seat-based menghormati max_agents (bukan jatuh ke FREE=2).
+    pro50 = lic.issue(_SEED, "Seat50", tier="pro", days=365, max_agents=50)
+    mgr.apply_license(pro50)
+    check("pro seat-based max_agents=50", mgr.license_status()["max_agents"] == 50)
+    # Regresi inti bug: token PRO TANPA field max_agents -> default seat PRO (50), bukan 2.
+    pro_nomax = lic.issue(_SEED, "NoMax", tier="pro", days=365, max_agents=None)
+    en = lic.entitlements(token=pro_nomax)
+    check("pro tanpa max_agents -> 50 (bukan 2)", en["max_agents"] == lic.PRO_DEFAULT_SEATS)
+    # Regresi: ENTERPRISE = unlimited (None) walau max_agents token = 0.
+    ent0 = lic.issue(_SEED, "Ent", tier="enterprise", days=365, max_agents=0)
+    check("enterprise -> unlimited (None)", lic.entitlements(token=ent0)["max_agents"] is None)
     mgr.apply_license("")          # kembali ke free utk seksi 28
     check("apply kosong -> free", mgr.license_status()["tier"] == "free")
 

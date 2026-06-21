@@ -1,9 +1,11 @@
 {
   "name": "nexus-fleet",
-  "version": "1.0.9",
+  "version": "1.2.1",
   "description": "Nexus Fleet — agent/manager/cli/dashboard keamanan endpoint (ala-Wazuh, ringan). npm membungkus engine Python stdlib-only.",
   "keywords": ["security", "soc", "edr", "agent", "manager", "monitoring", "wazuh", "fleet", "cli"],
+  "author": "chandafa (Nexus Security) <ck271138@gmail.com>",
   "license": "SEE LICENSE IN LICENSE",
+  "copyright": "Copyright (c) 2026 chandafa (Nexus Security). All rights reserved.",
   "engines": { "node": ">=14" },
   "bin": {
     "nexus-manager": "bin/nexus-manager.js",
@@ -24,7 +26,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "postinstall": "node bin/_check-python.js"
+    "postinstall": "node bin/_check-python.js",
+    "prepack": "node -e \"const fs=require('fs'),p=require('path');(function w(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory()){if(e.name==='__pycache__')fs.rmSync(f,{recursive:true,force:true});else w(f)}else if(e.name.endsWith('.pyc')||e.name.endsWith('.pyo'))fs.rmSync(f)}})('.')\""
   },
   "repository": {
     "type": "git",

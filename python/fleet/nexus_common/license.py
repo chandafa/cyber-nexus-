@@ -1,3 +1,9 @@
+# NEXUS — Copyright (c) 2026 chandafa (Nexus Security). All rights reserved.
+# Part of the Nexus security platform. Proprietary and confidential.
+# Unauthorized copying, modification, or distribution is prohibited.
+# This notice and embedded metadata must not be removed. See LICENSE / NOTICE.
+# Contact: ck271138@gmail.com
+
 # nexus_common/license.py
 """
 Lisensi Nexus (model freemium / open-core).
@@ -30,6 +36,11 @@ TIER_FEATURES = {
     "enterprise": ["unlimited_agents"] + _PRO,
 }
 FREE_MAX_AGENTS = 2
+PRO_DEFAULT_SEATS = 50                    # default seat PRO bila token tak memuat max_agents
+
+# Default seat per-tier (dipakai sebagai cadangan bila token valid tak punya field
+# max_agents). PRO = seat-based (50), ENTERPRISE = unlimited (None).
+DEFAULT_SEATS = {"free": FREE_MAX_AGENTS, "pro": PRO_DEFAULT_SEATS, "enterprise": None}
 
 _VENDOR_PUBKEY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                    "vendor_public.key")
@@ -118,9 +129,30 @@ def free_entitlements(reason="no_license") -> dict:
             "features": set(), "expires": 0, "reason": reason}
 
 
+_DESKTOP_LICENSE = os.path.join(os.path.expanduser("~"), ".nexus", "desktop_license.txt")
+
+
+def _device_id() -> str:
+    try:
+        from nexus_common import device
+        return device.device_id()
+    except Exception:
+        return ""
+
+
 def entitlements(token: str = "", pubkey_hex: str = "") -> dict:
-    """Resolusi hak pakai dari token (atau FREE bila tak ada/invalid)."""
+    """
+    Resolusi hak pakai dari token (atau FREE bila tak ada/invalid).
+
+    Satu lisensi untuk GUI + CLI: bila token tak diberikan & env NEXUS_LICENSE
+    kosong, jatuh ke file lisensi desktop (~/.nexus/desktop_license.txt). Token
+    device-bound (punya field `device`) hanya berlaku di mesin yang sama.
+    """
     token = (token or os.environ.get("NEXUS_LICENSE", "")).strip()
+    # Fallback ke lisensi desktop HANYA bila NEXUS_LICENSE tak diset sama sekali
+    # (server yang menyetelnya — termasuk ke "" — tetap dihormati; test aman).
+    if not token and "NEXUS_LICENSE" not in os.environ and os.path.isfile(_DESKTOP_LICENSE):
+        token = _DESKTOP_LICENSE  # satu token mengikat GUI + CLI di mesin yang sama
     if not token:
         return free_entitlements("no_license")
     # token bisa berupa path file
@@ -133,12 +165,39 @@ def entitlements(token: str = "", pubkey_hex: str = "") -> dict:
     if not res["valid"]:
         return free_entitlements(res["reason"])
     p = res["payload"]
+    # Pengikatan device: token ber-field `device` hanya sah di mesin itu.
+    bound = p.get("device")
+    if bound and bound != _device_id():
+        return free_entitlements("device_mismatch")
     feats = set(p.get("features", []))
+    tier = p.get("tier", "pro")
     return {
-        "valid": True, "tier": p.get("tier", "pro"), "licensee": p.get("licensee", ""),
-        "max_agents": None if "unlimited_agents" in feats else int(p.get("max_agents", FREE_MAX_AGENTS)),
+        "valid": True, "tier": tier, "licensee": p.get("licensee", ""),
+        "max_agents": _resolve_seats(tier, feats, p.get("max_agents")),
         "features": feats, "expires": int(p.get("expires", 0) or 0), "reason": "ok",
     }
+
+
+def _resolve_seats(tier: str, feats: set, raw_max) -> "int | None":
+    """
+    Hitung batas seat (None = unlimited). Aturan, anti salah-konfigurasi:
+      - fitur unlimited_agents / tier enterprise  -> unlimited (None)
+      - token punya max_agents > 0                -> hormati nilai itu (seat-based PRO)
+      - token tanpa max_agents (atau <= 0)         -> default per-tier; PRO -> 50, FREE -> 2
+    Ini mencegah lisensi PRO yang token-nya tak memuat max_agents jatuh ke batas FREE (2).
+    """
+    if "unlimited_agents" in feats or tier == "enterprise":
+        return None
+    try:
+        if raw_max is not None:
+            n = int(raw_max)
+            if n <= 0:               # 0/negatif diperlakukan unlimited (defensif)
+                return None
+            return n
+    except (TypeError, ValueError):
+        pass
+    default = DEFAULT_SEATS.get(tier, FREE_MAX_AGENTS)
+    return default if default is None else int(default)
 
 
 def has(ent: dict, feature: str) -> bool:

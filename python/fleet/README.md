@@ -1,9 +1,11 @@
 <div align="center">
 
-# Nexus Fleet
+# Nexus Fleet + SecOps
 
 **Lightweight, developer-first security platform for endpoints, servers, and web apps.**
-Agent · Manager · CLI · Dashboard — a Wazuh-style architecture you can `pip install`.
+Agent · Manager · CLI · Dashboard — a Wazuh-style architecture you can `pip install`,
+now with a full **SecOps SOC brain**: SIEM · XDR · EDR · UEBA · SOAR · Threat Intel · NDR ·
+Cloud CSPM · **local AI triage** (no external API).
 
 [![PyPI](https://img.shields.io/pypi/v/nexus-fleet?logo=pypi&logoColor=white)](https://pypi.org/project/nexus-fleet/)
 [![npm](https://img.shields.io/npm/v/nexus-fleet?logo=npm)](https://www.npmjs.com/package/nexus-fleet)
@@ -45,6 +47,15 @@ The agent is **pure-Python (stdlib only)** — deploy it on any host with Python
 | **Detection** | Rule engine (level 0–15 + MITRE ATT&CK), **Sigma import**, log decoders, **Vulnerability Detection** (inventory ↔ CVE) |
 | **Response** | Alert engine with deduplication, ack/resolve, **Active Response** (block IP, dry-run by default), audit log |
 | **Operations** | Multi-agent management, central policy, store-and-forward offline buffering, consistent reports, posture score |
+| **SecOps — SIEM** | NQL query language + aggregations over the event/alert store (`nexus_secops.siem`) |
+| **SecOps — XDR** | Cross-event, time-windowed correlation → kill-chain incidents (`correlate`) |
+| **SecOps — EDR** | Real process tree (pid/ppid) + suspicious-lineage detection (`edr`) |
+| **SecOps — UEBA** | Per-entity behavioral baselines + anomaly scoring + peer analysis (`ueba`) |
+| **SecOps — SOAR** | Playbooks → real active-response, dry-run-safe, run history (`soar`) |
+| **SecOps — Threat Intel** | IOC store + match on real telemetry + feed import (`threatintel`) |
+| **SecOps — NDR** | Beaconing/C2, port-scan & IOC-destination detection from flows (`ndr`) |
+| **SecOps — Cloud** | CSPM: evaluate cloud config vs CIS + import Prowler (`cloud`) |
+| **SecOps — AI** | **Local** Naive-Bayes + heuristic triage, kill-chain NLG, NL→query — no token (`ai`) |
 
 ## Architecture
 
@@ -66,7 +77,16 @@ The agent is **pure-Python (stdlib only)** — deploy it on any host with Python
         │  FIM · Log Monitoring · SCA · Syscollector · Web Audit · │
         │  Active Response · offline store-and-forward queue       │
         └──────────────────────────────────────────────────────────┘
+
+  nexus-secops — SOC analytics layer ON TOP of the manager's store (no new agent):
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │  siem · correlate(XDR) · edr · ueba · soar · threatintel · ndr · cloud ·  │
+  │  ai (local triage)        →  all read the same event/alert store          │
+  └──────────────────────────────────────────────────────────────────────────┘
 ```
+
+> One platform, one agent, modules inside — the Wazuh/Elastic/Defender/Cortex model.
+> Full hierarchy & data flow: [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
 ## Installation
 
@@ -82,25 +102,33 @@ pip install nexus-fleet
 npm install -g nexus-fleet
 ```
 
-Both install five commands: `nexus-manager`, `nexus-agent`, `nexus-cli`, `nexus-dashboard`,
-`nexus-license`. Requires **Python 3.8+** on the host.
+Both install the umbrella command **`nexus`** plus five standalone commands: `nexus-manager`,
+`nexus-agent`, `nexus-cli`, `nexus-dashboard`, `nexus-license`. Requires **Python 3.8+** on the host.
+
+```bash
+nexus --version       # prints: nexus 2.0.0   (verify the install on any terminal)
+nexus --help          # list sub-commands
+```
 
 ## Quick Start
 
 ```bash
 # 1. Central server (also serves the dashboard at http://<host>:8765/)
-nexus-manager run --host 0.0.0.0 --port 8765
-nexus-manager info                       # prints enrollment key + admin token
+nexus manager run --host 0.0.0.0 --port 8765
+nexus manager info                       # prints enrollment key + admin token
 
 # 2. On each endpoint
-nexus-agent enroll --host <manager> --port 8765 --key <ENROLL_KEY> --labels prod,web
-nexus-agent start                        # runs as a daemon (see deploy/ for service files)
+nexus agent enroll --host <manager> --port 8765 --key <ENROLL_KEY> --labels prod,web
+nexus agent start                        # runs as a daemon (see deploy/ for service files)
 
 # 3. Administration
-nexus-cli                                # interactive SOC console (network & web menus)
-nexus-cli --token <ADMIN_TOKEN> alerts   # list alerts (rule engine + MITRE)
-nexus-cli --token <ADMIN_TOKEN> report   # consistent report (schema nexus.report/v1)
+nexus cli                                # interactive SOC console (network & web menus)
+nexus cli --token <ADMIN_TOKEN> alerts   # list alerts (rule engine + MITRE)
+nexus cli --token <ADMIN_TOKEN> report   # consistent report (schema nexus.report/v1)
 ```
+
+> Each `nexus <sub>` form maps to the matching standalone command (`nexus manager run`
+> ≡ `nexus-manager run`). Use whichever you prefer.
 
 Run as a boot-time service using the units in [`deploy/`](./deploy) (systemd / Windows Task Scheduler).
 
@@ -108,26 +136,40 @@ Run as a boot-time service using the units in [`deploy/`](./deploy) (systemd / W
 
 | | **Free** | **Pro** | **Enterprise** |
 | --- | --- | --- | --- |
-| Agents | 2 | seat-based | Unlimited |
+| Agents (seats) | 2 | seat-based (default 50) | Unlimited |
 | Detection rules | Core | Full (FIM, web audit, SCA, vuln) | Full |
 | Sigma import · Active Response | — | ✓ | ✓ |
 | Web/app audit · Reports · Posture score | Limited | ✓ | ✓ |
 
 Licensing is enforced by Ed25519-signed tokens (`nexus-license`). Without a license, the Manager
-runs in **Free** mode. Contact the vendor for Pro/Enterprise licensing.
+runs in **Free** mode (2 agents). A **Pro** token is **seat-based** — it allows up to its seat count
+(default 50) of agents to enroll; **Enterprise** is unlimited. One token unlocks the desktop GUI, the
+CLI, and Fleet on the **same device** (`~/.nexus/desktop_license.txt`). Apply a token to the Manager
+with `NEXUS_LICENSE=<token-or-file>` or `nexus cli apply-license`. Contact the vendor for licensing.
 
 ## Security Model
 
-- **Transport:** HMAC-SHA256 per-agent message signing; enrollment key + admin token.
-- **Privacy:** offline-first — scan/telemetry data is stored locally; nothing is sent to the internet.
-- **Authorized use only:** for ethical, authorized security testing on systems you own or are
-  permitted to assess.
+| Area | Protection |
+| --- | --- |
+| **Transport** | HMAC-SHA256 per-agent message signing; optional **TLS / mTLS** for the Manager API |
+| **Authentication** | Enrollment key for agents; admin token with **RBAC** roles (admin / analyst / read-only) |
+| **At rest** | Sensitive event fields encrypted at rest (Fernet); SQLite in WAL mode |
+| **Integrity** | Replay/clock-skew protection on signed messages; tamper-evident audit log |
+| **Privacy** | Offline-first — telemetry is stored locally; nothing is sent to the internet |
+| **Scope** | For ethical, **authorized** security testing on systems you own or may assess |
 
 ## Documentation
 
+- Architecture & hierarchy — [`ARCHITECTURE.md`](./ARCHITECTURE.md)
 - Product brief & pricing — `docs/PRODUCT-BRIEF.md`
 - IP & licensing — `docs/IP-PROTECTION.md`
-- Validation: `python tests/test_fleet.py`, `pwsh validate.ps1`, `pwsh validate_agent.ps1`
+- Validation (Fleet + all 9 SecOps pillars):
+  `python tests/test_fleet.py` · `test_secops.py` · `test_soar.py` · `test_threatintel.py` ·
+  `test_ueba.py` · `test_ai.py` · `test_edr.py` · `test_cloud.py` · `test_ndr.py`
+
+## Support
+
+Licensing, sales, and security reports: **ck271138@gmail.com**
 
 ## License
 

@@ -52,5 +52,12 @@ vendor_private.key
 *.license
 .nexus/
 # (vendor_public.key SENGAJA tidak diabaikan — itu publik & wajib ikut paket)
-
 cyber_nexus*
+# RAHASIA Firebase — service account & secret JANGAN PERNAH di-commit
+**/serviceAccount*.json
+firebase/admin/serviceAccount.json
+firebase/functions/venv/
+.firebase/
+*.runtimeconfig.json
+.env
+.env.*

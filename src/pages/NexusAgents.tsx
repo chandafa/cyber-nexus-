@@ -15,6 +15,7 @@ interface ListenerStatus {
   is_running: boolean;
   port_1514: number;
   port_1515: number;
+  lan_ip?: string;
   connected_agents: Agent[];
 }
 
@@ -62,6 +63,7 @@ export const NexusAgents: React.FC = () => {
         is_running: res.is_running,
         port_1514: res.port_1514,
         port_1515: res.port_1515,
+        lan_ip: res.lan_ip,
         connected_agents: res.connected_agents || [],
       });
       setPortData(String(res.port_1514));
@@ -491,10 +493,10 @@ export const NexusAgents: React.FC = () => {
                 <div className="text-[10px] text-nexus-subtle">Perintah Pemasangan (Auto-configure):</div>
                 <div className="bg-nexus-panel p-2 rounded border border-nexus-border/50 flex items-center justify-between gap-2">
                   <code className="text-nexus-text text-[10px] break-all select-all font-mono">
-                    curl -sSL http://YOUR_MANAGER_LAN_IP:{status.port_1515}/install | sudo bash
+                    curl -sSL http://{status.lan_ip || "YOUR_MANAGER_LAN_IP"}:{status.port_1515}/install | sudo bash
                   </code>
                   <button
-                    onClick={() => copyToClipboard(`curl -sSL http://YOUR_MANAGER_LAN_IP:${status.port_1515}/install | sudo bash`)}
+                    onClick={() => copyToClipboard(`curl -sSL http://${status.lan_ip || "YOUR_MANAGER_LAN_IP"}:${status.port_1515}/install | sudo bash`)}
                     className="nx-btn-ghost p-1 shrink-0"
                     title="Salin"
                   >
@@ -503,7 +505,9 @@ export const NexusAgents: React.FC = () => {
                 </div>
               </div>
               <p className="text-[10px] text-nexus-subtle">
-                *Ganti <code className="font-mono bg-nexus-panel px-0.5 rounded text-nexus-text">YOUR_MANAGER_LAN_IP</code> dengan alamat IP lokal/LAN/VPN komputer Manager Anda. Server Manager akan menyajikan skrip instalasi secara offline dan mengkonfigurasi IP agen secara otomatis.
+                {status.lan_ip
+                  ? "Jalankan satu baris di atas pada endpoint Linux/WSL target — IP Manager sudah terisi otomatis. Tak perlu menempel skrip; agen nyata akan terpasang & mendaftar sendiri."
+                  : "Ganti YOUR_MANAGER_LAN_IP dengan IP LAN komputer Manager Anda. Manager menyajikan skrip instalasi offline & mengkonfigurasi agen otomatis."}
               </p>
             </div>
           </div>

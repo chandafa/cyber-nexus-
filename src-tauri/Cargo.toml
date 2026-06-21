@@ -1,8 +1,8 @@
 [package]
 name = "nexus"
-version = "1.0.0"
-description = "Nexus — AI Security Agent Desktop"
-authors = ["Project Nexus"]
+version = "1.2.1"
+description = "Nexus — developer-first security platform"
+authors = ["chandafa (Nexus Security)"]
 edition = "2021"
 rust-version = "1.77"
 
