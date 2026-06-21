@@ -8,6 +8,7 @@ venv/
 # Build output
 dist/
 src-tauri/target/
+nexus-agent/target/
 
 # Python runtime yang di-bundle (di-generate scripts/prepare-python-runtime.ps1).
 # Folder dipertahankan via PLACEHOLDER.txt agar glob resource Tauri tidak error
@@ -27,7 +28,8 @@ captures/
 Thumbs.db
 .vscode/
 .idea/
-
+.cursor/
+debug/
 # Wordlists (large) — keep samples only
 wordlists/rockyou_full.txt
 
@@ -38,6 +40,9 @@ build.exit
 # Certificates
 python/modules/waf_cert.pem
 python/modules/waf_key.pem
+*.pem
+*.key
+!vendor_public.key
 
 # Tauri updater signing keys — RAHASIA, jangan pernah commit private key.
 # Public key (.pub) boleh ditaruh di tauri.conf.json; private key masuk GitHub Secret.
@@ -61,3 +66,9 @@ firebase/functions/venv/
 *.runtimeconfig.json
 .env
 .env.*
+
+# Testing & Caches
+.pytest_cache/
+.coverage
+htmlcov/
+.wrangler/
