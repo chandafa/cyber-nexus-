@@ -78,3 +78,42 @@ def incidents(host, port, token, status="open"):
 
 def add_user(host, port, token, role="viewer"):
     return fc.post_admin(_url(host, port, "/users"), {"role": role}, token)
+
+
+# --------------------------------------------------------------------------- SecOps (Pro)
+# Membaca lapisan analitik SOC lewat API manager. Bila lisensi bukan Pro/Enterprise,
+# manager membalas 403 (fitur 'secops' terkunci) — sama seperti gerbang GUI.
+import urllib.parse as _up  # noqa: E402
+
+
+def search(host, port, token, index="events", q="", limit=200):
+    qs = _up.urlencode({"index": index, "q": q, "limit": limit})
+    return fc.get_admin(_url(host, port, f"/search?{qs}"), token)
+
+
+def xdr(host, port, token, status=""):
+    return fc.get_admin(_url(host, port, f"/xdr/incidents?status={status}"), token)
+
+
+def ueba(host, port, token):
+    return fc.get_admin(_url(host, port, "/ueba/scores"), token)
+
+
+def ti(host, port, token):
+    return fc.get_admin(_url(host, port, "/ti/iocs"), token)
+
+
+def ndr(host, port, token):
+    return fc.get_admin(_url(host, port, "/ndr/talkers"), token)
+
+
+def cloud(host, port, token):
+    return fc.get_admin(_url(host, port, "/cloud/findings"), token)
+
+
+def triage(host, port, token):
+    return fc.get_admin(_url(host, port, "/ai/triage"), token)
+
+
+def soar(host, port, token):
+    return fc.get_admin(_url(host, port, "/soar/playbooks"), token)

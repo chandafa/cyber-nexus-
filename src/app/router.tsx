@@ -51,6 +51,16 @@ import { HashTool } from "../pages/HashTool";
 // Fleet / SOC (arsitektur agent <-> manager)
 import { FleetManager } from "../pages/FleetManager";
 import { FleetAgent } from "../pages/FleetAgent";
+// SecOps (Pro) — 9 pilar SOC native
+import { SiemSearch } from "../pages/secops/SiemSearch";
+import { XdrIncidents } from "../pages/secops/XdrIncidents";
+import { EdrTree } from "../pages/secops/EdrTree";
+import { Ueba } from "../pages/secops/Ueba";
+import { Soar } from "../pages/secops/Soar";
+import { ThreatIntel } from "../pages/secops/ThreatIntel";
+import { Ndr } from "../pages/secops/Ndr";
+import { CloudCspm } from "../pages/secops/CloudCspm";
+import { AiTriage } from "../pages/secops/AiTriage";
 
 export const router = createHashRouter([
   { path: "/setup", element: <SetupWizard /> },
@@ -101,6 +111,16 @@ export const router = createHashRouter([
           { path: "scheduler", element: <Scheduler /> },
           { path: "fleet-manager", element: <FleetManager /> },
           { path: "fleet-agent", element: <FleetAgent /> },
+          // -------- SecOps (Pro) — 9 pilar SOC --------
+          { path: "siem-search", element: <SiemSearch /> },
+          { path: "xdr", element: <XdrIncidents /> },
+          { path: "edr", element: <EdrTree /> },
+          { path: "ueba", element: <Ueba /> },
+          { path: "soar", element: <Soar /> },
+          { path: "threat-intel", element: <ThreatIntel /> },
+          { path: "ndr", element: <Ndr /> },
+          { path: "cloud-cspm", element: <CloudCspm /> },
+          { path: "ai-triage", element: <AiTriage /> },
         ],
       },
     ],

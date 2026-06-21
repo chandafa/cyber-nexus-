@@ -28,8 +28,9 @@ from nexus_common import _ed25519 as ed
 
 # ----- definisi tier & fitur -----
 FEATURES_ALL = ["unlimited_agents", "sigma", "active_response",
-                "advanced_rules", "webaudit", "report"]
-_PRO = ["sigma", "active_response", "advanced_rules", "webaudit", "report"]
+                "advanced_rules", "webaudit", "report", "secops"]
+# "secops" = seluruh modul SOC (SIEM/XDR/EDR/UEBA/SOAR/Threat-Intel/NDR/Cloud/AI).
+_PRO = ["sigma", "active_response", "advanced_rules", "webaudit", "report", "secops"]
 TIER_FEATURES = {
     "free": [],
     "pro": _PRO,                          # seat-terbatas (max_agents dihormati)

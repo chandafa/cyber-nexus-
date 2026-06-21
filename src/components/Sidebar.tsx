@@ -102,6 +102,21 @@ const GROUPS: { title: string; icon: IconComp; items: NavItem[] }[] = [
     ],
   },
   {
+    title: "SecOps",
+    icon: Ic.suite,
+    items: [
+      { to: "/siem-search", label: "SIEM — Search", icon: Ic.search },
+      { to: "/xdr", label: "XDR — Incidents", icon: Ic.suite },
+      { to: "/edr", label: "EDR — Process Tree", icon: Ic.server },
+      { to: "/ueba", label: "UEBA — Entity Risk", icon: Ic.human },
+      { to: "/soar", label: "SOAR — Playbooks", icon: Ic.mitigation },
+      { to: "/threat-intel", label: "Threat Intelligence", icon: Ic.exploit },
+      { to: "/ndr", label: "NDR — Network", icon: Ic.network },
+      { to: "/cloud-cspm", label: "Cloud (CSPM)", icon: Ic.cloud },
+      { to: "/ai-triage", label: "AI Triage", icon: Ic.activity },
+    ],
+  },
+  {
     title: "Sistem",
     icon: Ic.settings,
     items: [
