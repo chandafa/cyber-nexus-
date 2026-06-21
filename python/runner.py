@@ -192,7 +192,12 @@ def dispatch(command: str, kwargs: dict) -> dict:
             'ssl_cert_type': kwargs.get('ssl_cert_type', 'self_signed'),
             'ssl_cert_path': kwargs.get('ssl_cert_path', ''),
             'ssl_key_path': kwargs.get('ssl_key_path', ''),
-            'blacklist_ips': kwargs.get('blacklist_ips', '')
+            'blacklist_ips': kwargs.get('blacklist_ips', ''),
+            'blacklist_countries': kwargs.get('blacklist_countries', ''),
+            'identity_enabled': kwargs.get('identity_enabled', 'false'),
+            'identity_password': kwargs.get('identity_password', ''),
+            'captcha_enabled': kwargs.get('captcha_enabled', 'false'),
+            'obfuscation_enabled': kwargs.get('obfuscation_enabled', 'false')
         }
         if fg:
             return waf.run_foreground(**run_args)
@@ -232,7 +237,12 @@ def dispatch(command: str, kwargs: dict) -> dict:
             rules_json=kwargs.get('rules_json', '[]'),
             vhost_type=kwargs.get('vhost_type', 'proxy'),
             root_directory=kwargs.get('root_directory', ''),
-            blacklist_ips=kwargs.get('blacklist_ips', '')
+            blacklist_ips=kwargs.get('blacklist_ips', ''),
+            blacklist_countries=kwargs.get('blacklist_countries', ''),
+            identity_enabled=kwargs.get('identity_enabled', 'false'),
+            identity_password=kwargs.get('identity_password', ''),
+            captcha_enabled=kwargs.get('captcha_enabled', 'false'),
+            obfuscation_enabled=kwargs.get('obfuscation_enabled', 'false')
         )
 
     if command == 'waf_delete_vhost':

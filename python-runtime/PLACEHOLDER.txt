@@ -1,9 +1,0 @@
-Folder ini diisi runtime Python embeddable oleh scripts/prepare-python-runtime.ps1
-saat build rilis (lihat .github/workflows/release.yml), lalu di-bundle ke dalam
-aplikasi via tauri.conf.json (resources) sehingga Nexus berjalan di komputer lain
-TANPA perlu memasang Python.
-
-File placeholder ini hanya menjaga agar folder selalu ada — supaya glob resource
-Tauri tidak error pada build lokal/CI yang belum menyiapkan runtime. Backend Rust
-(src-tauri/src/commands/executor.rs → python_exe) otomatis fallback ke Python host
-jika runtime bundel belum tersedia.

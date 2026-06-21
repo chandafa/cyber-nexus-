@@ -139,6 +139,9 @@ pub fn run_python_blocking(
 ) -> Result<Value, String> {
     let (runner, root) = resolve_runner(app)?;
     let mut cmd = Command::new(python_exe(&root));
+    if let Ok(app_data) = app.path().app_data_dir() {
+        cmd.env("NEXUS_APP_DATA_DIR", app_data);
+    }
     cmd.arg("-u")
         .arg(&runner)
         .arg(command)
@@ -220,6 +223,9 @@ pub async fn run_scan(
     }
 
     let mut spawn_cmd = Command::new(python_exe(&root));
+    if let Ok(app_data) = app.path().app_data_dir() {
+        spawn_cmd.env("NEXUS_APP_DATA_DIR", app_data);
+    }
     spawn_cmd
         .arg("-u")
         .arg(&runner)

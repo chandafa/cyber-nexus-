@@ -16,8 +16,12 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     watch: {
-      // tell vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // tell vite to ignore watching `src-tauri`, python-runtime, and python folders
+      ignored: [
+        "**/src-tauri/**",
+        "**/python-runtime/**",
+        "**/python/**"
+      ],
     },
   },
   // to access the Tauri environment variables set by the CLI with information about the current target

@@ -26,6 +26,12 @@ class MockBackendHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # Suppress console logging during tests
     def do_GET(self):
+        if self.path.startswith('/html'):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(b"<h1>Mock HTML Response</h1>")
+            return
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
@@ -379,6 +385,172 @@ class TestWAF(unittest.TestCase):
         req3 = urllib.request.Request(url1, headers={'Host': 'azharmtq.my.id'})
         with urllib.request.urlopen(req3, timeout=2) as response:
             self.assertEqual(response.status, 200)
+
+    def test_country_blacklisting(self):
+        listen_port = self.get_free_port()
+        waf.run(
+            listen_port=str(listen_port),
+            backend='127.0.0.1',
+            backend_port=str(self.backend_port),
+            max_rps='100',
+            blacklist_countries='JP'
+        )
+        time.sleep(0.5)
+
+        # Send request with a client IP that resolves to JP (e.g. 203.0.113.195)
+        url = f"http://127.0.0.1:{listen_port}/some-page"
+        req = urllib.request.Request(url, headers={
+            'CF-Connecting-IP': '203.0.113.195'
+        })
+        try:
+            urllib.request.urlopen(req, timeout=2)
+            self.fail("Request from blacklisted country should have returned 403 Forbidden")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 403)
+
+    def test_html_obfuscation(self):
+        listen_port = self.get_free_port()
+        waf.run(
+            listen_port=str(listen_port),
+            backend='127.0.0.1',
+            backend_port=str(self.backend_port),
+            max_rps='100',
+            obfuscation_enabled='true'
+        )
+        time.sleep(0.5)
+
+        # Request HTML page
+        url = f"http://127.0.0.1:{listen_port}/html-page"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=2) as response:
+            self.assertEqual(response.status, 200)
+            content = response.read().decode('utf-8')
+            # The plain backend HTML <h1>Mock HTML Response</h1> must NOT be visible
+            self.assertNotIn("<h1>Mock HTML Response</h1>", content)
+            # The WAF base64 script wrapper must be present
+            self.assertIn("<script>", content)
+            self.assertIn("atob(", content)
+            self.assertIn("document.write(", content)
+
+    def test_identity_gateway(self):
+        listen_port = self.get_free_port()
+        vhost_password = "my-secret-gate"
+        waf.run(
+            listen_port=str(listen_port),
+            backend='127.0.0.1',
+            backend_port=str(self.backend_port),
+            max_rps='100',
+            identity_enabled='true',
+            identity_password=vhost_password
+        )
+        time.sleep(0.5)
+
+        # 1. Access normal path -> should intercept and serve the Identity Gate page
+        url = f"http://127.0.0.1:{listen_port}/normal-path"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=2) as response:
+            self.assertEqual(response.status, 200)
+            content = response.read().decode('utf-8')
+            # It should display the Identity Gateway password page
+            self.assertIn("Identity Gateway", content)
+            self.assertIn("Gateway Password", content)
+
+        # 2. POST wrong password to /waf_identity_verify -> should return error page (200)
+        verify_url = f"http://127.0.0.1:{listen_port}/waf_identity_verify?r=/normal-path"
+        post_data = urllib.parse.urlencode({'password': 'wrong-password'}).encode('utf-8')
+        req_post_fail = urllib.request.Request(verify_url, data=post_data, method='POST')
+        with urllib.request.urlopen(req_post_fail, timeout=2) as response:
+            self.assertEqual(response.status, 200)
+            content = response.read().decode('utf-8')
+            self.assertIn("Password salah", content)
+
+        # 3. POST correct password -> should return 302 redirecting to /normal-path and Set-Cookie for identity token
+        post_data_success = urllib.parse.urlencode({'password': vhost_password}).encode('utf-8')
+        req_post_ok = urllib.request.Request(verify_url, data=post_data_success, method='POST')
+        
+        # We need to prevent urllib from automatically following redirects to check the headers
+        class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, hdrs, newurl):
+                return None
+        
+        opener = urllib.request.build_opener(NoRedirectHandler)
+        try:
+            opener.open(req_post_ok, timeout=2)
+            self.fail("POST should have redirected with 302")
+        except urllib.error.HTTPError as e:
+            if e.code in (301, 302):
+                redirect_url = e.headers.get('Location')
+                set_cookie = e.headers.get('Set-Cookie', '')
+                self.assertIn('/normal-path', redirect_url)
+                self.assertIn('waf_identity_token=', set_cookie)
+                cookie_val = set_cookie.split(';')[0]
+            else:
+                self.fail(f"POST returned unexpected status code: {e.code}")
+
+        # 4. Request with valid Cookie should bypass the gateway and hit the backend
+        req_bypass = urllib.request.Request(url, headers={'Cookie': cookie_val})
+        with urllib.request.urlopen(req_bypass, timeout=2) as response:
+            self.assertEqual(response.status, 200)
+            body = json.loads(response.read().decode('utf-8'))
+            self.assertEqual(body.get("status"), "backend_ok")
+
+    def test_anti_bot_captcha(self):
+        listen_port = self.get_free_port()
+        waf.run(
+            listen_port=str(listen_port),
+            backend='127.0.0.1',
+            backend_port=str(self.backend_port),
+            max_rps='1',
+            captcha_enabled='true'
+        )
+        time.sleep(0.5)
+
+        url = f"http://127.0.0.1:{listen_port}/"
+        
+        # Send first request (should succeed)
+        with urllib.request.urlopen(url, timeout=2) as response:
+            self.assertEqual(response.status, 200)
+
+        # Send second request immediately (should exceed rate limit and trigger CAPTCHA page)
+        req_captcha = urllib.request.Request(url)
+        with urllib.request.urlopen(req_captcha, timeout=2) as response:
+            self.assertEqual(response.status, 200)
+            content = response.read().decode('utf-8')
+            self.assertIn("Verify You Are Human", content)
+            self.assertIn("math-box", content)
+            
+            # Find numbers in puzzle
+            import re
+            m = re.search(r"(\d+)\s*\+\s*(\d+)\s*=\s*\?", content)
+            self.assertTrue(m, "CAPTCHA puzzle math formula not found in page")
+            num1 = int(m.group(1))
+            num2 = int(m.group(2))
+            ans = num1 + num2
+            
+            # Extract Set-Cookie waf_captcha_challenge
+            set_cookie = response.headers.get('Set-Cookie', '')
+            self.assertIn('waf_captcha_challenge=', set_cookie)
+            challenge_cookie = set_cookie.split(';')[0]
+
+        # Solve challenge via CAPTCHA verification URL
+        verify_url = f"http://127.0.0.1:{listen_port}/waf_captcha_verify?ans={ans}&r=/"
+        req_verify = urllib.request.Request(verify_url, headers={'Cookie': challenge_cookie})
+        
+        class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, hdrs, newurl):
+                return None
+        
+        opener = urllib.request.build_opener(NoRedirectHandler)
+        try:
+            opener.open(req_verify, timeout=2)
+            self.fail("Verification should have redirected with 302")
+        except urllib.error.HTTPError as e:
+            if e.code in (301, 302):
+                self.assertIn('/', e.headers.get('Location'))
+                set_cookie_passed = e.headers.get('Set-Cookie', '')
+                self.assertIn('waf_captcha_passed=1', set_cookie_passed)
+            else:
+                self.fail(f"Verification returned unexpected status code: {e.code}")
 
 if __name__ == '__main__':
     unittest.main()

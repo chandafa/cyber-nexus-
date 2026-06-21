@@ -531,6 +531,7 @@ const WafVhostTab: React.FC<{
               <th className="p-3.5">Forward Address</th>
               <th className="p-3.5">RPS Limit</th>
               <th className="p-3.5">Learning Mode</th>
+              <th className="p-3.5">Gateway Security</th>
               <th className="p-3.5">Active Rules</th>
               <th className="p-3.5 text-right">Aksi</th>
             </tr>
@@ -538,7 +539,7 @@ const WafVhostTab: React.FC<{
           <tbody className="divide-y divide-nexus-hairline">
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={6} className="text-center py-10 text-nexus-subtle italic">
+                <td colSpan={7} className="text-center py-10 text-nexus-subtle italic">
                   {vhosts.length === 0 ? "Belum ada virtual host yang dikonfigurasi." : "Tidak ada hasil pencocokan."}
                 </td>
               </tr>
@@ -570,6 +571,33 @@ const WafVhostTab: React.FC<{
                     <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${vh.learning_mode ? 'bg-yellow-950/40 text-yellow-300 border border-yellow-800' : 'bg-green-950/40 text-green-300 border-green-800'}`}>
                       {vh.learning_mode ? "Learning" : "Blocking"}
                     </span>
+                  </td>
+                  <td className="p-3.5">
+                    <div className="flex flex-wrap gap-1 max-w-[150px]">
+                      {vh.blacklist_countries && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] bg-red-950/40 text-red-300 border border-red-800 font-mono font-semibold" title={`Blokir Negara: ${vh.blacklist_countries}`}>
+                          GEO
+                        </span>
+                      )}
+                      {vh.identity_enabled && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] bg-blue-950/40 text-blue-300 border border-blue-800 font-mono font-semibold" title="Identity Gateway Aktif">
+                          GATEWAY
+                        </span>
+                      )}
+                      {vh.captcha_enabled && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] bg-yellow-950/40 text-yellow-300 border border-yellow-800 font-mono font-semibold" title="Anti-Bot CAPTCHA Aktif">
+                          CAPTCHA
+                        </span>
+                      )}
+                      {vh.obfuscation_enabled && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] bg-purple-950/40 text-purple-300 border border-purple-800 font-mono font-semibold" title="Dynamic HTML/JS Encryption Aktif">
+                          OBFUSCATE
+                        </span>
+                      )}
+                      {!vh.blacklist_countries && !vh.identity_enabled && !vh.captcha_enabled && !vh.obfuscation_enabled && (
+                        <span className="text-nexus-muted text-[10.5px] italic">-</span>
+                      )}
+                    </div>
                   </td>
                   <td className="p-3.5">
                     <div className="flex flex-wrap gap-1 max-w-xs">
@@ -729,6 +757,11 @@ export const WAF: React.FC = () => {
   const [allowlistIps, setAllowlistIps] = useState("");
   const [allowlistPaths, setAllowlistPaths] = useState("");
   const [blacklistIps, setBlacklistIps] = useState("");
+  const [blacklistCountries, setBlacklistCountries] = useState("");
+  const [identityEnabled, setIdentityEnabled] = useState(false);
+  const [identityPassword, setIdentityPassword] = useState("");
+  const [captchaEnabled, setCaptchaEnabled] = useState(false);
+  const [obfuscationEnabled, setObfuscationEnabled] = useState(false);
 
   // SSL settings
   const [sslEnabled, setSslEnabled] = useState(false);
@@ -756,6 +789,11 @@ export const WAF: React.FC = () => {
   const [newVhostIps, setNewVhostIps] = useState("");
   const [newVhostPaths, setNewVhostPaths] = useState("");
   const [newVhostBlacklistIps, setNewVhostBlacklistIps] = useState("");
+  const [newVhostBlacklistCountries, setNewVhostBlacklistCountries] = useState("");
+  const [newVhostIdentityEnabled, setNewVhostIdentityEnabled] = useState(false);
+  const [newVhostIdentityPassword, setNewVhostIdentityPassword] = useState("");
+  const [newVhostCaptchaEnabled, setNewVhostCaptchaEnabled] = useState(false);
+  const [newVhostObfuscationEnabled, setNewVhostObfuscationEnabled] = useState(false);
   const [editingVhostId, setEditingVhostId] = useState<number | null>(null);
   const [newVhostType, setNewVhostType] = useState<"proxy" | "static">("proxy");
   const [newVhostRootDir, setNewVhostRootDir] = useState("");
@@ -784,6 +822,11 @@ export const WAF: React.FC = () => {
         allowlist_ips: allowlistIps,
         allowlist_paths: allowlistPaths,
         blacklist_ips: blacklistIps,
+        blacklist_countries: blacklistCountries,
+        identity_enabled: identityEnabled,
+        identity_password: identityPassword,
+        captcha_enabled: captchaEnabled,
+        obfuscation_enabled: obfuscationEnabled,
         ssl_enabled: sslEnabled,
         ssl_cert_type: sslCertType,
         ssl_cert_path: sslCertPath,
@@ -802,7 +845,25 @@ export const WAF: React.FC = () => {
     try {
       const res = await runToolJson("waf_get_vhosts");
       if (res && res.status === "ok") {
-        setVhosts(res.vhosts || []);
+        const vhList = res.vhosts || [];
+        setVhosts(vhList);
+        
+        // Find default wildcard vhost to populate general WAF configs on page load
+        const defaultVh = vhList.find((v: any) => v.hostname === "*");
+        if (defaultVh) {
+          setBackendHost(defaultVh.backend_host);
+          setBackendPort(defaultVh.backend_port);
+          setMaxRps(String(defaultVh.max_rps));
+          setLearningMode(defaultVh.learning_mode);
+          setAllowlistIps(defaultVh.allowlist_ips || "");
+          setAllowlistPaths(defaultVh.allowlist_paths || "");
+          setBlacklistIps(defaultVh.blacklist_ips || "");
+          setBlacklistCountries(defaultVh.blacklist_countries || "");
+          setIdentityEnabled(defaultVh.identity_enabled || false);
+          setIdentityPassword(defaultVh.identity_password || "");
+          setCaptchaEnabled(defaultVh.captcha_enabled || false);
+          setObfuscationEnabled(defaultVh.obfuscation_enabled || false);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -836,6 +897,11 @@ export const WAF: React.FC = () => {
         allowlist_ips: newVhostIps,
         allowlist_paths: newVhostPaths,
         blacklist_ips: newVhostBlacklistIps,
+        blacklist_countries: newVhostBlacklistCountries,
+        identity_enabled: newVhostIdentityEnabled,
+        identity_password: newVhostIdentityPassword,
+        captcha_enabled: newVhostCaptchaEnabled,
+        obfuscation_enabled: newVhostObfuscationEnabled,
         rules_json: JSON.stringify(selectedRules),
         vhost_type: newVhostType,
         root_directory: newVhostRootDir
@@ -844,6 +910,11 @@ export const WAF: React.FC = () => {
       setNewVhostIps("");
       setNewVhostPaths("");
       setNewVhostBlacklistIps("");
+      setNewVhostBlacklistCountries("");
+      setNewVhostIdentityEnabled(false);
+      setNewVhostIdentityPassword("");
+      setNewVhostCaptchaEnabled(false);
+      setNewVhostObfuscationEnabled(false);
       setNewVhostRootDir("");
       setEditingVhostId(null);
       fetchVhosts();
@@ -862,6 +933,11 @@ export const WAF: React.FC = () => {
     setNewVhostIps(vh.allowlist_ips || "");
     setNewVhostPaths(vh.allowlist_paths || "");
     setNewVhostBlacklistIps(vh.blacklist_ips || "");
+    setNewVhostBlacklistCountries(vh.blacklist_countries || "");
+    setNewVhostIdentityEnabled(vh.identity_enabled || false);
+    setNewVhostIdentityPassword(vh.identity_password || "");
+    setNewVhostCaptchaEnabled(vh.captcha_enabled || false);
+    setNewVhostObfuscationEnabled(vh.obfuscation_enabled || false);
     setNewVhostType(vh.vhost_type || "proxy");
     setNewVhostRootDir(vh.root_directory || "");
     setSelectedRules(vh.rules || []);
@@ -877,6 +953,11 @@ export const WAF: React.FC = () => {
     setNewVhostIps("");
     setNewVhostPaths("");
     setNewVhostBlacklistIps("");
+    setNewVhostBlacklistCountries("");
+    setNewVhostIdentityEnabled(false);
+    setNewVhostIdentityPassword("");
+    setNewVhostCaptchaEnabled(false);
+    setNewVhostObfuscationEnabled(false);
     setNewVhostType("proxy");
     setNewVhostRootDir("");
     setSelectedRules(["sql_injection", "xss", "path_traversal", "cmd_injection", "scanner_detected"]);
@@ -1140,6 +1221,68 @@ export const WAF: React.FC = () => {
                   placeholder="e.g. 192.168.1.55, 45.227.254.10"
                 />
               </div>
+              <div>
+                <label className="nx-label">
+                  Blacklist Countries (comma-separated)
+                  <HelpTip text="Daftar kode negara (dipisah koma) untuk diblokir aksesnya. Contoh: US, CN, RU." />
+                </label>
+                <input
+                  className="nx-input font-mono text-xs"
+                  value={blacklistCountries}
+                  onChange={(e) => setBlacklistCountries(e.target.value)}
+                  placeholder="e.g. US, CN, RU"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-nexus-hairline/40">
+                <label className="flex items-center gap-2 text-xs font-medium cursor-pointer text-nexus-text select-none">
+                  <input
+                    type="checkbox"
+                    checked={captchaEnabled}
+                    onChange={(e) => setCaptchaEnabled(e.target.checked)}
+                    className="h-4 w-4 rounded border-nexus-hairline bg-nexus-surface text-nexus-accent focus:ring-nexus-accent"
+                  />
+                  Anti-Bot CAPTCHA
+                  <HelpTip text="Tampilkan tantangan matematika jika klien melebihi RPS limit atau memicu rules." />
+                </label>
+
+                <label className="flex items-center gap-2 text-xs font-medium cursor-pointer text-nexus-text select-none">
+                  <input
+                    type="checkbox"
+                    checked={obfuscationEnabled}
+                    onChange={(e) => setObfuscationEnabled(e.target.checked)}
+                    className="h-4 w-4 rounded border-nexus-hairline bg-nexus-surface text-nexus-accent focus:ring-nexus-accent"
+                  />
+                  HTML/JS Encryption
+                  <HelpTip text="Enkripsi file HTML/JS secara dinamis setiap kali halaman diakses untuk mengelabui scraper." />
+                </label>
+              </div>
+
+              <div className="pt-2 border-t border-nexus-hairline/40 space-y-2">
+                <label className="flex items-center gap-2 text-xs font-medium cursor-pointer text-nexus-text select-none">
+                  <input
+                    type="checkbox"
+                    checked={identityEnabled}
+                    onChange={(e) => setIdentityEnabled(e.target.checked)}
+                    className="h-4 w-4 rounded border-nexus-hairline bg-nexus-surface text-nexus-accent focus:ring-nexus-accent"
+                  />
+                  Identity Gateway
+                  <HelpTip text="Aktifkan autentikasi password global sebelum diperbolehkan mengakses halaman web." />
+                </label>
+
+                {identityEnabled && (
+                  <div>
+                    <label className="nx-label">Gateway Password</label>
+                    <input
+                      type="password"
+                      className="nx-input text-xs"
+                      value={identityPassword}
+                      onChange={(e) => setIdentityPassword(e.target.value)}
+                      placeholder="Masukkan password gateway"
+                    />
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* SSL/TLS termination configs */}
@@ -1310,6 +1453,62 @@ export const WAF: React.FC = () => {
                   onChange={(e) => setNewVhostBlacklistIps(e.target.value)}
                   placeholder="e.g. 45.227.254.10"
                 />
+              </div>
+              <div>
+                <label className="nx-label">Blacklist Countries (comma-separated)</label>
+                <input
+                  className="nx-input font-mono text-xs"
+                  value={newVhostBlacklistCountries}
+                  onChange={(e) => setNewVhostBlacklistCountries(e.target.value)}
+                  placeholder="e.g. US, CN"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-nexus-hairline/40">
+                <label className="flex items-center gap-2 text-xs font-medium cursor-pointer text-nexus-text select-none">
+                  <input
+                    type="checkbox"
+                    checked={newVhostCaptchaEnabled}
+                    onChange={(e) => setNewVhostCaptchaEnabled(e.target.checked)}
+                    className="h-4 w-4 rounded border-nexus-hairline bg-nexus-surface text-nexus-accent focus:ring-nexus-accent"
+                  />
+                  Anti-Bot CAPTCHA
+                </label>
+
+                <label className="flex items-center gap-2 text-xs font-medium cursor-pointer text-nexus-text select-none">
+                  <input
+                    type="checkbox"
+                    checked={newVhostObfuscationEnabled}
+                    onChange={(e) => setNewVhostObfuscationEnabled(e.target.checked)}
+                    className="h-4 w-4 rounded border-nexus-hairline bg-nexus-surface text-nexus-accent focus:ring-nexus-accent"
+                  />
+                  HTML/JS Encryption
+                </label>
+              </div>
+
+              <div className="pt-2 border-t border-nexus-hairline/40 space-y-2">
+                <label className="flex items-center gap-2 text-xs font-medium cursor-pointer text-nexus-text select-none">
+                  <input
+                    type="checkbox"
+                    checked={newVhostIdentityEnabled}
+                    onChange={(e) => setNewVhostIdentityEnabled(e.target.checked)}
+                    className="h-4 w-4 rounded border-nexus-hairline bg-nexus-surface text-nexus-accent focus:ring-nexus-accent"
+                  />
+                  Identity Gateway
+                </label>
+
+                {newVhostIdentityEnabled && (
+                  <div>
+                    <label className="nx-label">Gateway Password</label>
+                    <input
+                      type="password"
+                      className="nx-input text-xs"
+                      value={newVhostIdentityPassword}
+                      onChange={(e) => setNewVhostIdentityPassword(e.target.value)}
+                      placeholder="Masukkan password gateway"
+                    />
+                  </div>
+                )}
               </div>
 
               <div>

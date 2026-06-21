@@ -28,6 +28,9 @@ import os
 import sqlite3
 import shutil
 import queue
+import hashlib
+import random
+import string
 from urllib.parse import urlsplit, unquote, parse_qs
 from typing import Optional
 
@@ -35,11 +38,17 @@ from core.stream_handler import emit_line
 
 _SERVER = None
 _THREAD = None
-_DB_PATH = os.path.join(os.path.dirname(__file__), "waf_events.db")
+_WAF_DATA_DIR = os.environ.get("NEXUS_APP_DATA_DIR")
+if not _WAF_DATA_DIR:
+    _WAF_DATA_DIR = os.path.dirname(__file__)
+else:
+    os.makedirs(_WAF_DATA_DIR, exist_ok=True)
+
+_DB_PATH = os.path.join(_WAF_DATA_DIR, "waf_events.db")
 _IN_MEMORY_LOGS = []
 _LOG_CAPACITY = int(os.environ.get('WAF_LOG_CAPACITY', '5000'))
 _MAX_LOG_MB = 10.0
-_LOCAL_VHOSTS_PATH = os.path.join(os.path.dirname(__file__), "vhosts_local.json")
+_LOCAL_VHOSTS_PATH = os.path.join(_WAF_DATA_DIR, "vhosts_local.json")
 
 def _init_local_vhosts_file():
     if not os.path.exists(_LOCAL_VHOSTS_PATH):
@@ -203,7 +212,7 @@ def _init_db():
             cur.execute("ALTER TABLE events ADD COLUMN country_code TEXT")
         if 'country_name' not in cols:
             cur.execute("ALTER TABLE events ADD COLUMN country_name TEXT")
-            
+
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS vhosts (
@@ -218,19 +227,15 @@ def _init_db():
                 allowlist_ips TEXT,
                 allowlist_paths TEXT,
                 blacklist_ips TEXT DEFAULT '',
+                blacklist_countries TEXT DEFAULT '',
+                identity_enabled INTEGER DEFAULT 0,
+                identity_password TEXT DEFAULT '',
+                captcha_enabled INTEGER DEFAULT 0,
+                obfuscation_enabled INTEGER DEFAULT 0,
                 rules TEXT
             )
             """
         )
-        # Migrasi kolom vhost_type, root_directory & blacklist_ips untuk vhosts
-        cur.execute("PRAGMA table_info(vhosts)")
-        cols_vh = [c[1] for c in cur.fetchall()]
-        if 'vhost_type' not in cols_vh:
-            cur.execute("ALTER TABLE vhosts ADD COLUMN vhost_type TEXT DEFAULT 'proxy'")
-        if 'root_directory' not in cols_vh:
-            cur.execute("ALTER TABLE vhosts ADD COLUMN root_directory TEXT DEFAULT ''")
-        if 'blacklist_ips' not in cols_vh:
-            cur.execute("ALTER TABLE vhosts ADD COLUMN blacklist_ips TEXT DEFAULT ''")
 
         cur.execute(
             """
@@ -243,13 +248,32 @@ def _init_db():
             )
             """
         )
+        # Migrasi kolom vhost_type, root_directory & blacklist_ips untuk vhosts
+        cur.execute("PRAGMA table_info(vhosts)")
+        cols_vh = [c[1] for c in cur.fetchall()]
+        if 'vhost_type' not in cols_vh:
+            cur.execute("ALTER TABLE vhosts ADD COLUMN vhost_type TEXT DEFAULT 'proxy'")
+        if 'root_directory' not in cols_vh:
+            cur.execute("ALTER TABLE vhosts ADD COLUMN root_directory TEXT DEFAULT ''")
+        if 'blacklist_ips' not in cols_vh:
+            cur.execute("ALTER TABLE vhosts ADD COLUMN blacklist_ips TEXT DEFAULT ''")
+        if 'blacklist_countries' not in cols_vh:
+            cur.execute("ALTER TABLE vhosts ADD COLUMN blacklist_countries TEXT DEFAULT ''")
+        if 'identity_enabled' not in cols_vh:
+            cur.execute("ALTER TABLE vhosts ADD COLUMN identity_enabled INTEGER DEFAULT 0")
+        if 'identity_password' not in cols_vh:
+            cur.execute("ALTER TABLE vhosts ADD COLUMN identity_password TEXT DEFAULT ''")
+        if 'captcha_enabled' not in cols_vh:
+            cur.execute("ALTER TABLE vhosts ADD COLUMN captcha_enabled INTEGER DEFAULT 0")
+        if 'obfuscation_enabled' not in cols_vh:
+            cur.execute("ALTER TABLE vhosts ADD COLUMN obfuscation_enabled INTEGER DEFAULT 0")
         conn.commit()
         conn.close()
     except Exception as e:
         emit_line(f"[WAF] DB init error: {e}")
 
 
-def _init_db_and_default_vhost(backend_host: str, backend_port: int, max_rps: int, learning_mode: bool, allowlist_ips: str, allowlist_paths: str, blacklist_ips: str = ""):
+def _init_db_and_default_vhost(backend_host: str, backend_port: int, max_rps: int, learning_mode: bool, allowlist_ips: str, allowlist_paths: str, blacklist_ips: str = "", blacklist_countries: str = "", identity_enabled: bool = False, identity_password: str = "", captcha_enabled: bool = False, obfuscation_enabled: bool = False):
     _init_db()
     try:
         conn = sqlite3.connect(_DB_PATH)
@@ -257,8 +281,8 @@ def _init_db_and_default_vhost(backend_host: str, backend_port: int, max_rps: in
         rules_default = json.dumps(["sql_injection", "xss", "path_traversal", "cmd_injection", "scanner_detected"])
         cur.execute(
             """
-            INSERT INTO vhosts (hostname, backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules, blacklist_ips)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO vhosts (hostname, backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules, blacklist_ips, blacklist_countries, identity_enabled, identity_password, captcha_enabled, obfuscation_enabled)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(hostname) DO UPDATE SET
                 backend_host=excluded.backend_host,
                 backend_port=excluded.backend_port,
@@ -266,15 +290,347 @@ def _init_db_and_default_vhost(backend_host: str, backend_port: int, max_rps: in
                 learning_mode=excluded.learning_mode,
                 allowlist_ips=excluded.allowlist_ips,
                 allowlist_paths=excluded.allowlist_paths,
-                blacklist_ips=excluded.blacklist_ips
+                blacklist_ips=excluded.blacklist_ips,
+                blacklist_countries=excluded.blacklist_countries,
+                identity_enabled=excluded.identity_enabled,
+                identity_password=excluded.identity_password,
+                captcha_enabled=excluded.captcha_enabled,
+                obfuscation_enabled=excluded.obfuscation_enabled
             """,
-            ('*', backend_host, backend_port, max_rps, 1 if learning_mode else 0, allowlist_ips, allowlist_paths, rules_default, blacklist_ips)
+            ('*', backend_host, backend_port, max_rps, 1 if learning_mode else 0, allowlist_ips, allowlist_paths, rules_default, blacklist_ips, blacklist_countries, 1 if identity_enabled else 0, identity_password, 1 if captcha_enabled else 0, 1 if obfuscation_enabled else 0)
         )
         conn.commit()
         conn.close()
     except Exception as e:
         emit_line(f"[WAF] init default vhost error: {e}")
         emit_line(f"[WAF] Gagal inisialisasi default vhost: {e}")
+
+
+# HTML template for CAPTCHA Challenge (premium dark mode glassmorphism)
+HTML_CAPTCHA_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security Verification — Cyber Nexus WAF</title>
+    <style>
+        body {{
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #0f172a;
+            background: radial-gradient(circle at center, #1e1b4b 0%, #09090b 100%);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: #f4f4f5;
+            text-align: center;
+        }}
+        .card {{
+            background: rgba(30, 41, 59, 0.4);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 40px 30px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }}
+        .icon {{
+            font-size: 50px;
+            margin-bottom: 20px;
+            display: inline-block;
+        }}
+        h1 {{
+            font-size: 24px;
+            font-weight: 700;
+            margin: 0 0 10px 0;
+            color: #ffffff;
+        }}
+        p {{
+            font-size: 13.5px;
+            color: #a1a1aa;
+            margin: 0 0 25px 0;
+            line-height: 1.5;
+        }}
+        .math-box {{
+            background: rgba(99, 102, 241, 0.15);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: 8px;
+            padding: 15px;
+            font-size: 22px;
+            font-weight: bold;
+            letter-spacing: 2px;
+            color: #818cf8;
+            margin-bottom: 25px;
+            font-family: monospace;
+        }}
+        .input-group {{
+            margin-bottom: 20px;
+        }}
+        .input-group input {{
+            width: 100%;
+            padding: 12px;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 8px;
+            color: #ffffff;
+            font-size: 16px;
+            text-align: center;
+            box-sizing: border-box;
+            outline: none;
+            transition: border-color 0.2s;
+        }}
+        .input-group input:focus {{
+            border-color: #6366f1;
+        }}
+        .btn {{
+            width: 100%;
+            padding: 12px;
+            background: #4f46e5;
+            border: none;
+            border-radius: 8px;
+            color: #ffffff;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }}
+        .btn:hover {{
+            background: #4338ca;
+        }}
+        .error {{
+            color: #ef4444;
+            font-size: 13px;
+            margin-top: 10px;
+        }}
+        .footer {{
+            font-size: 11px;
+            color: #71717a;
+            margin-top: 30px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon">🛡️</div>
+        <h1>Verify You Are Human</h1>
+        <p>Your request has triggered security verification checks. Please solve the math puzzle below to proceed.</p>
+        
+        <div class="math-box">
+            {num1} + {num2} = ?
+        </div>
+        
+        <form action="/waf_captcha_verify" method="GET">
+            <input type="hidden" name="r" value="{redirect_path}">
+            <div class="input-group">
+                <input type="number" name="ans" required placeholder="Masukkan jawaban Anda" autofocus autocomplete="off">
+            </div>
+            <button type="submit" class="btn">Verify & Continue</button>
+        </form>
+        
+        {error_msg}
+        
+        <div class="footer">
+            Protected by <strong>Cyber Nexus WAF</strong> (Anti-Bot Gateway)
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+# HTML template for Identity Gateway (premium dark mode glassmorphism)
+HTML_IDENTITY_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Identity Gateway — Cyber Nexus WAF</title>
+    <style>
+        body {{
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #09090b;
+            background: radial-gradient(circle at center, #0f172a 0%, #020617 100%);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: #f4f4f5;
+            text-align: center;
+        }}
+        .card {{
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(99, 102, 241, 0.15);
+            border-radius: 16px;
+            padding: 40px 30px;
+            width: 100%;
+            max-width: 380px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.6);
+        }}
+        .logo-box {{
+            margin-bottom: 25px;
+        }}
+        .logo-box svg {{
+            width: 50px;
+            height: 50px;
+            fill: #6366f1;
+        }}
+        h1 {{
+            font-size: 22px;
+            font-weight: 700;
+            margin: 0 0 8px 0;
+            color: #ffffff;
+            letter-spacing: -0.02em;
+        }}
+        p {{
+            font-size: 13px;
+            color: #a1a1aa;
+            margin: 0 0 25px 0;
+            line-height: 1.5;
+        }}
+        .input-group {{
+            margin-bottom: 20px;
+            text-align: left;
+        }}
+        .input-group label {{
+            display: block;
+            font-size: 11px;
+            font-weight: 600;
+            color: #818cf8;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+            letter-spacing: 0.5px;
+        }}
+        .input-group input {{
+            width: 100%;
+            padding: 12px;
+            background: rgba(9, 9, 11, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            color: #ffffff;
+            font-size: 15px;
+            box-sizing: border-box;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }}
+        .input-group input:focus {{
+            border-color: #6366f1;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
+        }}
+        .btn {{
+            width: 100%;
+            padding: 12px;
+            background: #6366f1;
+            border: none;
+            border-radius: 8px;
+            color: #ffffff;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+        }}
+        .btn:hover {{
+            background: #4f46e5;
+        }}
+        .btn:active {{
+            transform: scale(0.98);
+        }}
+        .error {{
+            color: #f87171;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.25);
+            border-radius: 8px;
+            font-size: 12.5px;
+            padding: 10px;
+            margin-bottom: 20px;
+            text-align: left;
+        }}
+        .footer {{
+            font-size: 11px;
+            color: #52525b;
+            margin-top: 35px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="logo-box">
+            <svg viewBox="0 0 24 24">
+                <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 6c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 12c-2.33 0-4.31-1.24-5.4-3.1.03-1.79 3.6-2.77 5.4-2.77 1.79 0 5.37.98 5.4 2.77-1.09 1.86-3.07 3.1-5.4 3.1z"/>
+            </svg>
+        </div>
+        <h1>Identity Gateway</h1>
+        <p>Akses ke halaman ini membutuhkan autentikasi keamanan. Silakan masukkan password akses Anda.</p>
+        
+        {error_html}
+        
+        <form action="/waf_identity_verify" method="POST">
+            <input type="hidden" name="r" value="{redirect_path}">
+            <div class="input-group">
+                <label for="password">Gateway Password</label>
+                <input type="password" id="password" name="password" required placeholder="••••••••" autofocus autocomplete="off">
+            </div>
+            <button type="submit" class="btn">Authenticate Access</button>
+        </form>
+        
+        <div class="footer">
+            Secured by <strong>Cyber Nexus Identity Gate</strong>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+def _obfuscate_html(html_str: str) -> str:
+    import base64
+    import random
+    import string
+    
+    # Generate random strings for variable names
+    var_payload = ''.join(random.choices(string.ascii_letters, k=8))
+    var_parts = ''.join(random.choices(string.ascii_letters, k=8))
+    var_res = ''.join(random.choices(string.ascii_letters, k=8))
+    
+    # Base64 encode the HTML
+    b64_payload = base64.b64encode(html_str.encode('utf-8')).decode('utf-8')
+    
+    # Split base64 into random chunks
+    chunks = []
+    i = 0
+    while i < len(b64_payload):
+        chunk_size = random.randint(15, 35)
+        chunks.append(b64_payload[i:i+chunk_size])
+        i += chunk_size
+        
+    parts_js = ',\n                '.join(f'"{c}"' for c in chunks)
+    
+    obfuscated_html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Cyber Nexus Protected Page</title>
+    <script>
+        (function() {{
+            var {var_parts} = [
+                {parts_js}
+            ];
+            var {var_payload} = {var_parts}.join('');
+            var {var_res} = atob({var_payload});
+            document.open();
+            document.write({var_res});
+            document.close();
+        }})();
+    </script>
+</head>
+<body>
+    <noscript>This page is protected by Cyber Nexus WAF. Please enable JavaScript to access it.</noscript>
+</body>
+</html>"""
+    return obfuscated_html
 
 
 class SSLThreadingTCPServer(socketserver.ThreadingTCPServer):
@@ -333,6 +689,11 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
             'allowlist_ips': self.allowlist_ips,
             'allowlist_paths': self.allowlist_paths,
             'blacklist_ips': set(),
+            'blacklist_countries': set(),
+            'identity_enabled': False,
+            'identity_password': '',
+            'captcha_enabled': False,
+            'obfuscation_enabled': False,
             'rules': ["sql_injection", "xss", "path_traversal", "cmd_injection", "scanner_detected"]
         }
         
@@ -376,6 +737,7 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
                     al_ips = match.get('allowlist_ips', '')
                     al_paths = match.get('allowlist_paths', '')
                     bl_ips = match.get('blacklist_ips', '')
+                    bl_countries = match.get('blacklist_countries', '')
                     return {
                         'vhost_type': match.get('vhost_type', 'proxy'),
                         'backend_host': match.get('backend_host', '127.0.0.1'),
@@ -386,6 +748,11 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
                         'allowlist_ips': {ip.strip() for ip in al_ips.split(",") if ip.strip()} if isinstance(al_ips, str) else set(),
                         'allowlist_paths': [p.strip() for p in al_paths.split(",") if p.strip()] if isinstance(al_paths, str) else [],
                         'blacklist_ips': {ip.strip() for ip in bl_ips.split(",") if ip.strip()} if isinstance(bl_ips, str) else set(),
+                        'blacklist_countries': {c.strip().upper() for c in bl_countries.split(",") if c.strip()} if isinstance(bl_countries, str) else set(),
+                        'identity_enabled': bool(match.get('identity_enabled', False)),
+                        'identity_password': match.get('identity_password', ''),
+                        'captcha_enabled': bool(match.get('captcha_enabled', False)),
+                        'obfuscation_enabled': bool(match.get('obfuscation_enabled', False)),
                         'rules': match.get('rules', [])
                     }
         except Exception as e:
@@ -395,7 +762,7 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
         try:
             conn = sqlite3.connect(_DB_PATH)
             cur = conn.cursor()
-            cur.execute("SELECT hostname, backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules, vhost_type, root_directory, blacklist_ips FROM vhosts")
+            cur.execute("SELECT hostname, backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules, vhost_type, root_directory, blacklist_ips, blacklist_countries, identity_enabled, identity_password, captcha_enabled, obfuscation_enabled FROM vhosts")
             rows = cur.fetchall()
             conn.close()
 
@@ -424,7 +791,7 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
                         break
 
             if match_row:
-                hn, bh, bp, mr, lm, al_ips, al_paths, r_str, vh_type, root_dir, bl_ips = match_row
+                hn, bh, bp, mr, lm, al_ips, al_paths, r_str, vh_type, root_dir, bl_ips, bl_countries, id_en, id_pass, cap_en, obf_en = match_row
                 try:
                     rules_list = json.loads(r_str) if r_str else []
                 except Exception:
@@ -439,13 +806,20 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
                     'allowlist_ips': {ip.strip() for ip in al_ips.split(",") if ip.strip()} if al_ips else set(),
                     'allowlist_paths': [p.strip() for p in al_paths.split(",") if p.strip()] if al_paths else [],
                     'blacklist_ips': {ip.strip() for ip in bl_ips.split(",") if ip.strip()} if bl_ips else set(),
+                    'blacklist_countries': {c.strip().upper() for c in bl_countries.split(",") if c.strip()} if bl_countries else set(),
+                    'identity_enabled': bool(id_en),
+                    'identity_password': id_pass or '',
+                    'captcha_enabled': bool(cap_en),
+                    'obfuscation_enabled': bool(obf_en),
                     'rules': rules_list
                 }
         except Exception:
             pass
         return default_config
 
-    def _proxy_to_backend_custom(self, ip: str, body: bytes, decoded_path: str, decoded_body: str, headers_text: str, bh: str, bp: int):
+    def _proxy_to_backend_custom(self, ip: str, body: bytes, decoded_path: str, decoded_body: str, headers_text: str, config: dict):
+        bh = config['backend_host']
+        bp = config['backend_port']
         url = f'http://{bh}:{bp}{self.path}'
         headers = {k: v for k, v in self.headers.items() if k.lower() != 'host'}
         
@@ -464,14 +838,34 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
 
         try:
             resp = requests.request(self.command, url, headers=headers, data=body, allow_redirects=False, timeout=10)
+            
+            content_bytes = resp.content or b''
+            content_type = resp.headers.get('Content-Type', '').lower()
+            is_html = 'text/html' in content_type
+            
+            if config.get('obfuscation_enabled') and is_html and content_bytes:
+                try:
+                    html_str = content_bytes.decode('utf-8', errors='replace')
+                    obfuscated_html = _obfuscate_html(html_str)
+                    content_bytes = obfuscated_html.encode('utf-8')
+                except Exception as e:
+                    self._log(f"Failed to obfuscate proxy HTML: {e}")
+
             self.send_response(resp.status_code)
             for k, v in resp.headers.items():
                 if k.lower() in ('connection', 'keep-alive', 'transfer-encoding', 'upgrade'):
                     continue
-                self.send_header(k, v)
+                if k.lower() == 'content-length':
+                    self.send_header(k, str(len(content_bytes)))
+                else:
+                    self.send_header(k, v)
+                    
+            if 'content-length' not in [hk.lower() for hk in resp.headers.keys()] and content_bytes:
+                self.send_header('Content-Length', str(len(content_bytes)))
+                
             self.end_headers()
-            if resp.content:
-                self.wfile.write(resp.content)
+            if content_bytes:
+                self.wfile.write(content_bytes)
             try:
                 log_event(ip, f'allow:{resp.status_code}', decoded_path, decoded_body, headers_text)
             except Exception:
@@ -485,7 +879,7 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(err_body.encode('utf-8'))
             self._log(f"{ip} -> 502 proxy error for {bh}:{bp}: {e}")
 
-    def _serve_static_directory(self, ip: str, root_dir: str, decoded_path: str):
+    def _serve_static_directory(self, ip: str, root_dir: str, decoded_path: str, config: dict):
         import mimetypes
         
         path_only = decoded_path.split('?')[0].split('#')[0]
@@ -520,6 +914,16 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
         try:
             with open(safe_path, "rb") as f:
                 content = f.read()
+                
+            # Dynamic HTML/JS obfuscation
+            if config.get('obfuscation_enabled') and mime_type == 'text/html' and content:
+                try:
+                    html_str = content.decode('utf-8', errors='replace')
+                    obfuscated_html = _obfuscate_html(html_str)
+                    content = obfuscated_html.encode('utf-8')
+                except Exception as e:
+                    self._log(f"Failed to obfuscate static HTML: {e}")
+
             self.send_response(200)
             self.send_header('Content-Type', mime_type)
             self.send_header('Content-Length', str(len(content)))
@@ -533,14 +937,63 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(f"Internal Server Error: {e}".encode('utf-8'))
             self._log(f"{ip} -> static file read error: {e}")
-
     def _forward_request(self, ip: str, body: bytes, decoded_path: str, decoded_body: str, headers_text: str, config: dict):
         if config.get('vhost_type') == 'static' and config.get('root_directory'):
-            self._serve_static_directory(ip, config['root_directory'], decoded_path)
+            self._serve_static_directory(ip, config['root_directory'], decoded_path, config)
         else:
-            self._proxy_to_backend_custom(ip, body, decoded_path, decoded_body, headers_text, config['backend_host'], config['backend_port'])
+            self._proxy_to_backend_custom(ip, body, decoded_path, decoded_body, headers_text, config)
 
     def _proxy_request(self):
+        try:
+            self._proxy_request_internal()
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            self._log(f"CRITICAL: Secure by default triggered. Error in WAFHandler processing: {e}\n{tb}")
+            try:
+                self.send_response(500)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.end_headers()
+                err_body = """<!DOCTYPE html>
+<html>
+<head>
+    <title>Critical Security Error — Cyber Nexus WAF</title>
+    <style>
+        body {
+            background-color: #09090b;
+            color: #f87171;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            text-align: center;
+        }
+        .card {
+            background: rgba(239, 68, 68, 0.05);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            border-radius: 12px;
+            padding: 40px;
+            max-width: 450px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+        h1 { font-size: 20px; font-weight: 700; margin: 0 0 10px 0; color: #f87171; }
+        p { font-size: 13.5px; color: #a1a1aa; line-height: 1.5; margin: 0; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🔒 Security Lockdown</h1>
+        <p>A system error occurred in the security processing layer. To prevent bypass, the connection has been blocked. Please contact the administrator.</p>
+    </div>
+</body>
+</html>"""
+                self.wfile.write(err_body.encode('utf-8'))
+            except Exception:
+                pass
+
+    def _proxy_request_internal(self):
         # Resolve real client IP (supporting Cloudflare Tunnel, Nginx, Ngrok, etc.)
         ip = self.headers.get('CF-Connecting-IP')
         if not ip:
@@ -569,14 +1022,96 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
         allowlist_paths = config['allowlist_paths']
         enabled_rules_list = config['rules']
 
+        # 1. Handle CAPTCHA Verification Endpoint
+        if decoded_path.startswith('/waf_captcha_verify'):
+            qs = parse_qs(urlsplit(self.path).query)
+            ans = qs.get('ans', [''])[0].strip()
+            redirect_path = qs.get('r', ['/'])[0]
+            
+            # Read challenge cookie
+            challenge_cookie = None
+            cookies = self.headers.get('Cookie', '')
+            for cookie in cookies.split(';'):
+                cookie = cookie.strip()
+                if cookie.startswith('waf_captcha_challenge='):
+                    challenge_cookie = cookie.split('=', 1)[1]
+                    break
+                    
+            secret = "nexus_captcha_salt"
+            expected_hash = hashlib.md5((str(ans) + secret).encode('utf-8')).hexdigest()
+            
+            if challenge_cookie and challenge_cookie == expected_hash:
+                # Success! Set bypass cookie and redirect
+                self.send_response(302)
+                self.send_header('Location', redirect_path)
+                self.send_header('Set-Cookie', 'waf_captcha_passed=1; Path=/; Max-Age=3600')
+                self.send_header('Set-Cookie', 'waf_captcha_challenge=; Path=/; Max-Age=0')
+                self.end_headers()
+                self._log(f"{ip} -> solved CAPTCHA, redirecting to {redirect_path}")
+                return
+            else:
+                # Failure: serve captcha page again with error
+                num1 = random.randint(1, 20)
+                num2 = random.randint(1, 20)
+                ans_correct = num1 + num2
+                new_challenge = hashlib.md5((str(ans_correct) + secret).encode('utf-8')).hexdigest()
+                
+                error_msg = '<div class="error">Jawaban salah. Silakan coba lagi.</div>'
+                body_html = HTML_CAPTCHA_TEMPLATE.format(
+                    num1=num1,
+                    num2=num2,
+                    redirect_path=redirect_path,
+                    error_msg=error_msg
+                )
+                
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.send_header('Set-Cookie', f'waf_captcha_challenge={new_challenge}; Path=/; Max-Age=300')
+                self.end_headers()
+                self.wfile.write(body_html.encode('utf-8'))
+                self._log(f"{ip} -> failed CAPTCHA puzzle submission")
+                return
+
+        # 2. Handle Identity Verification Endpoint
+        if decoded_path.startswith('/waf_identity_verify'):
+            qs = parse_qs(urlsplit(self.path).query)
+            redirect_path = qs.get('r', ['/'])[0]
+            
+            post_vars = parse_qs(decoded_body)
+            submitted_password = post_vars.get('password', [''])[0].strip()
+            
+            vhost_password = config.get('identity_password', '')
+            if submitted_password == vhost_password:
+                secret = "nexus_identity_salt"
+                token_val = hashlib.sha256((vhost_password + secret).encode('utf-8')).hexdigest()
+                
+                self.send_response(302)
+                self.send_header('Location', redirect_path)
+                self.send_header('Set-Cookie', f'waf_identity_token={token_val}; Path=/; Max-Age=86400')
+                self.end_headers()
+                self._log(f"{ip} -> authenticated identity gate, redirecting to {redirect_path}")
+                return
+            else:
+                error_html = '<div class="error">Password salah. Akses ditolak.</div>'
+                body_html = HTML_IDENTITY_TEMPLATE.format(
+                    redirect_path=redirect_path,
+                    error_html=error_html
+                )
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(body_html.encode('utf-8'))
+                self._log(f"{ip} -> failed identity gate authentication")
+                return
+
         # Check IP blacklist
         blacklist_ips = config.get('blacklist_ips', set())
         if ip in blacklist_ips:
+            ts = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
+            err_body = HTML_BLOCK_TEMPLATE.format(rule='ip_blacklisted', ip=ip, path=decoded_path, ts=ts)
             self.send_response(403)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.end_headers()
-            ts = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
-            err_body = HTML_BLOCK_TEMPLATE.format(rule='ip_blacklisted', ip=ip, path=decoded_path, ts=ts)
             self.wfile.write(err_body.encode('utf-8'))
             self._log(f"{ip} -> 403 blocked by IP Blacklist")
             try:
@@ -584,6 +1119,51 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
             except Exception:
                 pass
             return
+
+        # Check Geo-Blocking
+        blacklist_countries = config.get('blacklist_countries', set())
+        if blacklist_countries:
+            geo = _resolve_country(ip, decoded_path)
+            country_code = geo['code'].upper()
+            if country_code in blacklist_countries:
+                ts = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
+                err_body = HTML_BLOCK_TEMPLATE.format(rule=f'geo_blocked_{country_code}', ip=ip, path=decoded_path, ts=ts)
+                self.send_response(403)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(err_body.encode('utf-8'))
+                self._log(f"{ip} -> 403 blocked by Geo-Blocking ({country_code})")
+                try:
+                    log_event(ip, f'geo_blocked_{country_code}', decoded_path, decoded_body, headers_text)
+                except Exception:
+                    pass
+                return
+
+        # Check Identity Gateway
+        if config.get('identity_enabled'):
+            cookies = self.headers.get('Cookie', '')
+            identity_token = None
+            for cookie in cookies.split(';'):
+                cookie = cookie.strip()
+                if cookie.startswith('waf_identity_token='):
+                    identity_token = cookie.split('=', 1)[1]
+                    break
+                    
+            vhost_password = config.get('identity_password', '')
+            secret = "nexus_identity_salt"
+            expected_token = hashlib.sha256((vhost_password + secret).encode('utf-8')).hexdigest()
+            
+            if not identity_token or identity_token != expected_token:
+                body_html = HTML_IDENTITY_TEMPLATE.format(
+                    redirect_path=self.path,
+                    error_html=''
+                )
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(body_html.encode('utf-8'))
+                self._log(f"{ip} -> intercepted by Identity Gateway (path: {self.path})")
+                return
 
         # Check IP allowlist
         if ip in allowlist_ips:
@@ -598,16 +1178,48 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
                 self._forward_request(ip, body, decoded_path, decoded_body, headers_text, config)
                 return
 
+        # Read CAPTCHA bypass cookie if any
+        cookies = self.headers.get('Cookie', '')
+        captcha_passed = False
+        for cookie in cookies.split(';'):
+            cookie = cookie.strip()
+            if cookie.startswith('waf_captcha_passed='):
+                if cookie.split('=', 1)[1] == '1':
+                    captcha_passed = True
+                break
+
         # Rate Limiting
         if self._rate_limit_exceeded_custom(ip, max_rps):
-            self.send_response(429)
-            self.send_header('Content-Type', 'text/html; charset=utf-8')
-            self.end_headers()
-            ts = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
-            err_body = HTML_BLOCK_TEMPLATE.format(rule='rate_limiting_exceeded', ip=ip, path=decoded_path, ts=ts)
-            self.wfile.write(err_body.encode('utf-8'))
-            self._log(f"{ip} -> 429 rate limit")
-            return
+            if config.get('captcha_enabled') and not captcha_passed:
+                num1 = random.randint(1, 20)
+                num2 = random.randint(1, 20)
+                ans_correct = num1 + num2
+                secret = "nexus_captcha_salt"
+                new_challenge = hashlib.md5((str(ans_correct) + secret).encode('utf-8')).hexdigest()
+                
+                body_html = HTML_CAPTCHA_TEMPLATE.format(
+                    num1=num1,
+                    num2=num2,
+                    redirect_path=self.path,
+                    error_msg=''
+                )
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.send_header('Set-Cookie', f'waf_captcha_challenge={new_challenge}; Path=/; Max-Age=300')
+                self.end_headers()
+                self.wfile.write(body_html.encode('utf-8'))
+                self._log(f"{ip} -> rate limit exceeded, serving CAPTCHA challenge")
+                return
+            else:
+                ts = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
+                err_body = HTML_BLOCK_TEMPLATE.format(rule='rate_limiting_exceeded', ip=ip, path=decoded_path, ts=ts)
+                
+                self.send_response(429)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(err_body.encode('utf-8'))
+                self._log(f"{ip} -> 429 rate limit")
+                return
 
         # Parse request inputs for rule checking
         parts = urlsplit(decoded_path)
@@ -680,14 +1292,36 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
                     log_event(ip, matched, decoded_path, decoded_body, headers_text)
                 except Exception:
                     pass
-                self.send_response(403)
-                self.send_header('Content-Type', 'text/html; charset=utf-8')
-                self.end_headers()
                 
-                ts = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
-                err_body = HTML_BLOCK_TEMPLATE.format(rule=matched, ip=ip, path=decoded_path, ts=ts)
-                self.wfile.write(err_body.encode('utf-8'))
-                self._log(f"{ip} -> 403 blocked by {matched}")
+                if config.get('captcha_enabled') and not captcha_passed:
+                    num1 = random.randint(1, 20)
+                    num2 = random.randint(1, 20)
+                    ans_correct = num1 + num2
+                    secret = "nexus_captcha_salt"
+                    new_challenge = hashlib.md5((str(ans_correct) + secret).encode('utf-8')).hexdigest()
+                    
+                    body_html = HTML_CAPTCHA_TEMPLATE.format(
+                        num1=num1,
+                        num2=num2,
+                        redirect_path=self.path,
+                        error_msg=''
+                    )
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/html; charset=utf-8')
+                    self.send_header('Set-Cookie', f'waf_captcha_challenge={new_challenge}; Path=/; Max-Age=300')
+                    self.end_headers()
+                    self.wfile.write(body_html.encode('utf-8'))
+                    self._log(f"{ip} -> rule matched {matched}, serving CAPTCHA challenge")
+                    return
+                else:
+                    ts = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
+                    err_body = HTML_BLOCK_TEMPLATE.format(rule=matched, ip=ip, path=decoded_path, ts=ts)
+                    
+                    self.send_response(403)
+                    self.send_header('Content-Type', 'text/html; charset=utf-8')
+                    self.end_headers()
+                    self.wfile.write(err_body.encode('utf-8'))
+                    self._log(f"{ip} -> 403 blocked by {matched}")
             return
 
         self._forward_request(ip, body, decoded_path, decoded_body, headers_text, config)
@@ -754,9 +1388,8 @@ def _find_openssl() -> str:
 
 def _auto_generate_cert() -> tuple[str, str]:
     """Auto generate self-signed certificate if openssl is available."""
-    dir_path = os.path.dirname(os.path.abspath(__file__))
-    cert_path = os.path.join(dir_path, "waf_cert.pem")
-    key_path = os.path.join(dir_path, "waf_key.pem")
+    cert_path = os.path.join(_WAF_DATA_DIR, "waf_cert.pem")
+    key_path = os.path.join(_WAF_DATA_DIR, "waf_key.pem")
 
     if os.path.exists(cert_path) and os.path.exists(key_path):
         return cert_path, key_path
@@ -782,9 +1415,13 @@ def _auto_generate_cert() -> tuple[str, str]:
 def _start_server(listen_port: int, backend_host: str, backend_port: int, max_rps: int,
                   learning_mode: bool = False, allowlist_ips: str = "", allowlist_paths: str = "",
                   ssl_enabled: bool = False, ssl_cert_type: str = "self_signed",
-                  ssl_cert_path: str = "", ssl_key_path: str = ""):
+                  ssl_cert_path: str = "", ssl_key_path: str = "", blacklist_ips: str = "",
+                  blacklist_countries: str = "", identity_enabled: bool = False, identity_password: str = "",
+                  captcha_enabled: bool = False, obfuscation_enabled: bool = False):
     global _SERVER, _THREAD
-    _init_db_and_default_vhost(backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths)
+    _init_db_and_default_vhost(backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths,
+                               blacklist_ips, blacklist_countries, identity_enabled, identity_password,
+                               captcha_enabled, obfuscation_enabled)
     if _SERVER:
         emit_line('[WAF] Server sudah berjalan')
         return True
@@ -842,7 +1479,9 @@ def _start_server(listen_port: int, backend_host: str, backend_port: int, max_rp
 def run(listen_port: str = '8080', backend: str = '127.0.0.1', backend_port: str = '8000', max_rps: str = '10',
         max_log_mb: str = '10', learning_mode: str = 'false', allowlist_ips: str = '', allowlist_paths: str = '',
         ssl_enabled: str = 'false', ssl_cert_type: str = 'self_signed',
-        ssl_cert_path: str = '', ssl_key_path: str = '') -> dict:
+        ssl_cert_path: str = '', ssl_key_path: str = '', blacklist_ips: str = '',
+        blacklist_countries: str = '', identity_enabled: str = 'false', identity_password: str = '',
+        captcha_enabled: str = 'false', obfuscation_enabled: str = 'false') -> dict:
     """Start WAF proxy in background and return status dict."""
     global _MAX_LOG_MB
     try:
@@ -852,13 +1491,18 @@ def run(listen_port: str = '8080', backend: str = '127.0.0.1', backend_port: str
         _MAX_LOG_MB = float(max_log_mb)
         lm = str(learning_mode).lower() in ('1', 'true', 'yes')
         se = str(ssl_enabled).lower() in ('1', 'true', 'yes')
+        id_en = str(identity_enabled).lower() in ('1', 'true', 'yes')
+        cap_en = str(captcha_enabled).lower() in ('1', 'true', 'yes')
+        obf_en = str(obfuscation_enabled).lower() in ('1', 'true', 'yes')
     except Exception:
         emit_line('[WAF] Invalid numeric argument')
         return {'module': 'waf', 'status': 'error', 'error': 'invalid args'}
 
     success = _start_server(lp, backend, bp, mr, learning_mode=lm, allowlist_ips=allowlist_ips,
                             allowlist_paths=allowlist_paths, ssl_enabled=se, ssl_cert_type=ssl_cert_type,
-                            ssl_cert_path=ssl_cert_path, ssl_key_path=ssl_key_path)
+                            ssl_cert_path=ssl_cert_path, ssl_key_path=ssl_key_path, blacklist_ips=blacklist_ips,
+                            blacklist_countries=blacklist_countries, identity_enabled=id_en, identity_password=identity_password,
+                            captcha_enabled=cap_en, obfuscation_enabled=obf_en)
     if not success:
         return {'module': 'waf', 'status': 'error', 'error': f'bind_failed:{listen_port}'}
 
@@ -868,7 +1512,9 @@ def run(listen_port: str = '8080', backend: str = '127.0.0.1', backend_port: str
 def run_foreground(listen_port: str = '8080', backend: str = '127.0.0.1', backend_port: str = '8000', max_rps: str = '10',
                    max_log_mb: str = '10', learning_mode: str = 'false', allowlist_ips: str = '', allowlist_paths: str = '',
                    ssl_enabled: str = 'false', ssl_cert_type: str = 'self_signed',
-                   ssl_cert_path: str = '', ssl_key_path: str = '') -> dict:
+                   ssl_cert_path: str = '', ssl_key_path: str = '', blacklist_ips: str = '',
+                   blacklist_countries: str = '', identity_enabled: str = 'false', identity_password: str = '',
+                   captcha_enabled: str = 'false', obfuscation_enabled: str = 'false') -> dict:
     """Start WAF and block in the current process."""
     global _MAX_LOG_MB
     try:
@@ -878,13 +1524,18 @@ def run_foreground(listen_port: str = '8080', backend: str = '127.0.0.1', backen
         _MAX_LOG_MB = float(max_log_mb)
         lm = str(learning_mode).lower() in ('1', 'true', 'yes')
         se = str(ssl_enabled).lower() in ('1', 'true', 'yes')
+        id_en = str(identity_enabled).lower() in ('1', 'true', 'yes')
+        cap_en = str(captcha_enabled).lower() in ('1', 'true', 'yes')
+        obf_en = str(obfuscation_enabled).lower() in ('1', 'true', 'yes')
     except Exception:
         emit_line('[WAF] Invalid numeric argument')
         return {'module': 'waf', 'status': 'error', 'error': 'invalid args'}
 
     success = _start_server(lp, backend, bp, mr, learning_mode=lm, allowlist_ips=allowlist_ips,
                             allowlist_paths=allowlist_paths, ssl_enabled=se, ssl_cert_type=ssl_cert_type,
-                            ssl_cert_path=ssl_cert_path, ssl_key_path=ssl_key_path)
+                            ssl_cert_path=ssl_cert_path, ssl_key_path=ssl_key_path, blacklist_ips=blacklist_ips,
+                            blacklist_countries=blacklist_countries, identity_enabled=id_en, identity_password=identity_password,
+                            captcha_enabled=cap_en, obfuscation_enabled=obf_en)
     if not success:
         return {'module': 'waf', 'status': 'error', 'error': f'bind_failed:{listen_port}'}
 
@@ -1243,6 +1894,11 @@ def get_vhosts() -> dict:
                         'allowlist_ips': vh.get('allowlist_ips', ''),
                         'allowlist_paths': vh.get('allowlist_paths', ''),
                         'blacklist_ips': vh.get('blacklist_ips', ''),
+                        'blacklist_countries': vh.get('blacklist_countries', ''),
+                        'identity_enabled': bool(vh.get('identity_enabled', False)),
+                        'identity_password': vh.get('identity_password', ''),
+                        'captcha_enabled': bool(vh.get('captcha_enabled', False)),
+                        'obfuscation_enabled': bool(vh.get('obfuscation_enabled', False)),
                         'rules': vh.get('rules', [])
                     })
                     seen_hostnames.add(hostname.lower())
@@ -1254,7 +1910,7 @@ def get_vhosts() -> dict:
         _init_db()
         conn = sqlite3.connect(_DB_PATH)
         cur = conn.cursor()
-        cur.execute("SELECT id, hostname, backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules, vhost_type, root_directory, blacklist_ips FROM vhosts")
+        cur.execute("SELECT id, hostname, backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules, vhost_type, root_directory, blacklist_ips, blacklist_countries, identity_enabled, identity_password, captcha_enabled, obfuscation_enabled FROM vhosts")
         rows = cur.fetchall()
         conn.close()
         for r in rows:
@@ -1272,6 +1928,11 @@ def get_vhosts() -> dict:
                     'allowlist_ips': r[6] or "",
                     'allowlist_paths': r[7] or "",
                     'blacklist_ips': r[11] or "",
+                    'blacklist_countries': r[12] or "",
+                    'identity_enabled': bool(r[13]),
+                    'identity_password': r[14] or "",
+                    'captcha_enabled': bool(r[15]),
+                    'obfuscation_enabled': bool(r[16]),
                     'rules': json.loads(r[8]) if r[8] else []
                 })
                 seen_hostnames.add(hostname.lower())
@@ -1283,13 +1944,18 @@ def get_vhosts() -> dict:
 
 def save_vhost(hostname: str, backend_host: str, backend_port: str, max_rps: str,
                learning_mode: str, allowlist_ips: str, allowlist_paths: str, rules_json: str,
-               vhost_type: str = 'proxy', root_directory: str = '', blacklist_ips: str = '') -> dict:
+               vhost_type: str = 'proxy', root_directory: str = '', blacklist_ips: str = '',
+               blacklist_countries: str = '', identity_enabled: str = 'false', identity_password: str = '',
+               captcha_enabled: str = 'false', obfuscation_enabled: str = 'false') -> dict:
     _init_local_vhosts_file()
     try:
         hostname = hostname.strip()
         bp = int(backend_port) if backend_port else 8000
         mr = int(max_rps) if max_rps else 10
         lm = str(learning_mode).lower() in ('1', 'true', 'yes')
+        id_en = str(identity_enabled).lower() in ('1', 'true', 'yes')
+        cap_en = str(captcha_enabled).lower() in ('1', 'true', 'yes')
+        obf_en = str(obfuscation_enabled).lower() in ('1', 'true', 'yes')
         rules_list = json.loads(rules_json) if rules_json else []
 
         # 1. Save to JSON
@@ -1316,6 +1982,11 @@ def save_vhost(hostname: str, backend_host: str, backend_port: str, max_rps: str
                     'allowlist_ips': allowlist_ips,
                     'allowlist_paths': allowlist_paths,
                     'blacklist_ips': blacklist_ips,
+                    'blacklist_countries': blacklist_countries,
+                    'identity_enabled': id_en,
+                    'identity_password': identity_password,
+                    'captcha_enabled': cap_en,
+                    'obfuscation_enabled': obf_en,
                     'rules': rules_list
                 }
                 found = True
@@ -1334,6 +2005,11 @@ def save_vhost(hostname: str, backend_host: str, backend_port: str, max_rps: str
                 'allowlist_ips': allowlist_ips,
                 'allowlist_paths': allowlist_paths,
                 'blacklist_ips': blacklist_ips,
+                'blacklist_countries': blacklist_countries,
+                'identity_enabled': id_en,
+                'identity_password': identity_password,
+                'captcha_enabled': cap_en,
+                'obfuscation_enabled': obf_en,
                 'rules': rules_list
             })
 
@@ -1346,11 +2022,14 @@ def save_vhost(hostname: str, backend_host: str, backend_port: str, max_rps: str
             conn = sqlite3.connect(_DB_PATH)
             cur = conn.cursor()
             db_lm = 1 if lm else 0
+            db_id_en = 1 if id_en else 0
+            db_cap_en = 1 if cap_en else 0
+            db_obf_en = 1 if obf_en else 0
             rules_str = json.dumps(rules_list)
             cur.execute(
                 """
-                INSERT INTO vhosts (hostname, backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules, vhost_type, root_directory, blacklist_ips)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO vhosts (hostname, backend_host, backend_port, max_rps, learning_mode, allowlist_ips, allowlist_paths, rules, vhost_type, root_directory, blacklist_ips, blacklist_countries, identity_enabled, identity_password, captcha_enabled, obfuscation_enabled)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(hostname) DO UPDATE SET
                     backend_host=excluded.backend_host,
                     backend_port=excluded.backend_port,
@@ -1361,9 +2040,14 @@ def save_vhost(hostname: str, backend_host: str, backend_port: str, max_rps: str
                     rules=excluded.rules,
                     vhost_type=excluded.vhost_type,
                     root_directory=excluded.root_directory,
-                    blacklist_ips=excluded.blacklist_ips
+                    blacklist_ips=excluded.blacklist_ips,
+                    blacklist_countries=excluded.blacklist_countries,
+                    identity_enabled=excluded.identity_enabled,
+                    identity_password=excluded.identity_password,
+                    captcha_enabled=excluded.captcha_enabled,
+                    obfuscation_enabled=excluded.obfuscation_enabled
                 """,
-                (hostname, backend_host, bp, mr, db_lm, allowlist_ips, allowlist_paths, rules_str, vhost_type, root_directory, blacklist_ips)
+                (hostname, backend_host, bp, mr, db_lm, allowlist_ips, allowlist_paths, rules_str, vhost_type, root_directory, blacklist_ips, blacklist_countries, db_id_en, identity_password, db_cap_en, db_obf_en)
             )
             conn.commit()
             conn.close()
