@@ -269,7 +269,11 @@ def main():
     print("== 25d. Syscollector (proses/jaringan) + suspicious process ==")
     from nexus_agent import collectors as C2
     pe = C2.c_processes({})
-    check("process inventory (process_list)", any(e["event_type"] == "process_list" for e in pe))
+    # Snapshot proses kini membawa pid/ppid (untuk pohon proses EDR), event_type baru.
+    check("process inventory (process_snapshot)",
+          any(e["event_type"] == "process_snapshot" for e in pe))
+    check("snapshot membawa detail pid/ppid (EDR)",
+          any(isinstance((e.get("data") or {}).get("processes"), list) for e in pe))
     ne = C2.c_network({})
     check("network inventory", ne[0]["event_type"] == "network_inventory")
     ingest([{"type": "processes", "severity": "high", "event_type": "suspicious_process",

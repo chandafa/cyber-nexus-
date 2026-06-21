@@ -26,13 +26,24 @@
         <button class="nav-item" data-view="alerts"><i data-icon="alerts"></i><span data-i18n="nav.alerts">Alerts</span><span class="badge" id="nav-alerts-badge"></span></button>
         <button class="nav-item" data-view="events"><i data-icon="events"></i><span data-i18n="nav.events">Events</span></button>
         <button class="nav-item" data-view="incidents"><i data-icon="incidents"></i><span data-i18n="nav.incidents">Incidents</span></button>
+        <div class="nav-sep"><span data-i18n="nav.secops">SecOps</span></div>
+        <button class="nav-item" data-view="search"><i data-icon="search"></i><span data-i18n="nav.search">Search</span></button>
+        <button class="nav-item" data-view="xdr"><i data-icon="xdr"></i><span data-i18n="nav.xdr">XDR</span></button>
+        <button class="nav-item" data-view="ai"><i data-icon="ai"></i><span data-i18n="nav.ai">AI Triage</span></button>
+        <button class="nav-item" data-view="edr"><i data-icon="edr"></i><span data-i18n="nav.edr">EDR</span></button>
+        <button class="nav-item" data-view="ueba"><i data-icon="ueba"></i><span data-i18n="nav.ueba">UEBA</span></button>
+        <button class="nav-item" data-view="intel"><i data-icon="intel"></i><span data-i18n="nav.intel">Threat Intel</span></button>
+        <button class="nav-item" data-view="cloud"><i data-icon="cloud"></i><span data-i18n="nav.cloud">Cloud</span></button>
+        <button class="nav-item" data-view="ndr"><i data-icon="ndr"></i><span data-i18n="nav.ndr">NDR</span></button>
+        <button class="nav-item" data-view="soar"><i data-icon="soar"></i><span data-i18n="nav.soar">SOAR</span></button>
+        <div class="nav-sep"><span data-i18n="nav.config">Config</span></div>
         <button class="nav-item" data-view="policy"><i data-icon="policy"></i><span data-i18n="nav.policy">Policy</span></button>
         <button class="nav-item" data-view="license"><i data-icon="license"></i><span data-i18n="nav.license">License</span></button>
         <button class="nav-item" data-view="help"><i data-icon="help"></i><span data-i18n="nav.help">Help</span></button>
       </nav>
       <div class="side-foot">
         <span class="lic-pill" id="side-tier">FREE</span>
-        <span class="ver">v1.2.1</span>
+        <span class="ver">v2.0.0</span>
       </div>
     </aside>
 
@@ -140,6 +151,135 @@
               <th data-i18n="inc.col.last">Last</th>
             </tr></thead><tbody></tbody></table>
             <p class="empty" id="incidents-empty" data-i18n="inc.empty"></p>
+          </div>
+        </section>
+
+        <!-- ===== SIEM Search ===== -->
+        <section class="view" data-view="search">
+          <div class="view-head"><h1 data-i18n="se.title">SIEM Search</h1><p class="hint" data-i18n="se.hint"></p></div>
+          <div class="panel">
+            <div class="searchbar">
+              <select id="se-index"><option value="events">events</option><option value="alerts">alerts</option></select>
+              <input id="se-q" data-i18n-ph="se.ph" />
+              <button id="se-go" class="btn-primary"><i data-icon="search" data-size="16"></i><span data-i18n="se.run">Search</span></button>
+              <button id="se-nl" class="icon-btn" data-i18n-title="se.nl"><i data-icon="ai" data-size="16"></i></button>
+            </div>
+            <p class="sub se-meta" id="se-meta"></p>
+            <table class="tbl" id="se-res"><thead><tr>
+              <th data-i18n="alerts.col.time">Time</th><th data-i18n="alerts.col.sev">Severity</th>
+              <th data-i18n="events.col.type">Type</th><th data-i18n="alerts.col.title">Title</th>
+              <th data-i18n="alerts.col.agent">Agent</th>
+            </tr></thead><tbody></tbody></table>
+            <p class="empty" id="se-empty" data-i18n="se.empty"></p>
+          </div>
+        </section>
+
+        <!-- ===== XDR ===== -->
+        <section class="view" data-view="xdr">
+          <div class="view-head"><h1 data-i18n="xdr.title">XDR — Correlated Incidents</h1><p class="hint" data-i18n="xdr.hint"></p></div>
+          <div class="panel">
+            <table class="tbl" id="xdr-list"><thead><tr>
+              <th data-i18n="xdr.col.name">Incident</th><th data-i18n="inc.col.sev">Severity</th>
+              <th data-i18n="xdr.col.entity">Entity</th><th data-i18n="xdr.col.signals">Signals</th>
+              <th data-i18n="alerts.col.status">Status</th><th data-i18n="inc.col.last">Last</th>
+            </tr></thead><tbody></tbody></table>
+            <p class="empty" id="xdr-empty" data-i18n="xdr.empty"></p>
+            <div id="xdr-detail" class="detail-box" style="display:none"></div>
+          </div>
+        </section>
+
+        <!-- ===== AI Triage ===== -->
+        <section class="view" data-view="ai">
+          <div class="view-head"><h1 data-i18n="ait.title">AI Triage</h1><p class="hint" data-i18n="ait.hint"></p></div>
+          <div class="panel">
+            <div class="actions"><span class="sub" id="ai-model"></span><button id="ai-run" class="btn-ghost"><i data-icon="refresh" data-size="14"></i><span data-i18n="ait.run">Triage open incidents</span></button></div>
+            <div id="ai-cards" class="triage-list"></div>
+            <p class="empty" id="ai-empty" data-i18n="ait.empty"></p>
+          </div>
+        </section>
+
+        <!-- ===== EDR ===== -->
+        <section class="view" data-view="edr">
+          <div class="view-head"><h1 data-i18n="edr.title">EDR — Process Tree</h1><p class="hint" data-i18n="edr.hint"></p></div>
+          <div class="panel">
+            <div class="searchbar"><select id="edr-host"></select><button id="edr-reload" class="icon-btn"><i data-icon="refresh" data-size="16"></i></button></div>
+            <div id="edr-tree" class="tree"></div>
+            <p class="empty" id="edr-empty" data-i18n="edr.empty"></p>
+          </div>
+        </section>
+
+        <!-- ===== UEBA ===== -->
+        <section class="view" data-view="ueba">
+          <div class="view-head"><h1 data-i18n="ueba.title">UEBA — Entity Risk</h1><p class="hint" data-i18n="ueba.hint"></p></div>
+          <div class="panel">
+            <table class="tbl" id="ueba-list"><thead><tr>
+              <th data-i18n="xdr.col.entity">Entity</th><th data-i18n="ueba.col.score">Risk</th>
+              <th data-i18n="ueba.col.band">Band</th><th data-i18n="ueba.col.reasons">Reasons</th>
+              <th data-i18n="alerts.col.time">Time</th>
+            </tr></thead><tbody></tbody></table>
+            <p class="empty" id="ueba-empty" data-i18n="ueba.empty"></p>
+          </div>
+        </section>
+
+        <!-- ===== Threat Intel ===== -->
+        <section class="view" data-view="intel">
+          <div class="view-head"><h1 data-i18n="ti.title">Threat Intelligence</h1><p class="hint" data-i18n="ti.hint"></p></div>
+          <div class="cards" id="ti-stats"></div>
+          <div class="panel">
+            <table class="tbl" id="ti-list"><thead><tr>
+              <th data-i18n="ti.col.type">Type</th><th data-i18n="ti.col.value">Indicator</th>
+              <th data-i18n="ti.col.threat">Threat</th><th data-i18n="inc.col.sev">Severity</th>
+              <th data-i18n="ti.col.source">Source</th>
+            </tr></thead><tbody></tbody></table>
+            <p class="empty" id="ti-empty" data-i18n="ti.empty"></p>
+          </div>
+        </section>
+
+        <!-- ===== Cloud ===== -->
+        <section class="view" data-view="cloud">
+          <div class="view-head"><h1 data-i18n="cl.title">Cloud Security (CSPM)</h1><p class="hint" data-i18n="cl.hint"></p></div>
+          <div class="cards" id="cl-posture"></div>
+          <div class="panel">
+            <table class="tbl" id="cl-list"><thead><tr>
+              <th data-i18n="cl.col.check">Check</th><th data-i18n="inc.col.sev">Severity</th>
+              <th data-i18n="cl.col.res">Resource</th><th data-i18n="cl.col.prov">Provider</th>
+              <th data-i18n="cl.col.fix">Remediation</th>
+            </tr></thead><tbody></tbody></table>
+            <p class="empty" id="cl-empty" data-i18n="cl.empty"></p>
+          </div>
+        </section>
+
+        <!-- ===== NDR ===== -->
+        <section class="view" data-view="ndr">
+          <div class="view-head"><h1 data-i18n="nd.title">NDR — Network Detection</h1><p class="hint" data-i18n="nd.hint"></p></div>
+          <div class="cards" id="nd-stats"></div>
+          <div class="panel">
+            <h2 data-i18n="nd.talkers">Top external talkers</h2>
+            <table class="tbl" id="nd-talkers"><thead><tr>
+              <th data-i18n="nd.col.dst">Destination</th><th data-i18n="nd.col.conn">Connections</th>
+              <th data-i18n="nd.col.bytes">Bytes</th>
+            </tr></thead><tbody></tbody></table>
+            <p class="empty" id="nd-empty" data-i18n="nd.empty"></p>
+          </div>
+        </section>
+
+        <!-- ===== SOAR ===== -->
+        <section class="view" data-view="soar">
+          <div class="view-head"><h1 data-i18n="so.title">SOAR — Playbooks</h1><p class="hint" data-i18n="so.hint"></p></div>
+          <div class="panel">
+            <h2 data-i18n="so.playbooks">Playbooks</h2>
+            <table class="tbl" id="so-pb"><thead><tr>
+              <th data-i18n="so.col.name">Playbook</th><th data-i18n="so.col.trigger">Trigger</th>
+              <th data-i18n="so.col.mode">Mode</th><th data-i18n="so.col.enabled">Enabled</th>
+            </tr></thead><tbody></tbody></table>
+          </div>
+          <div class="panel">
+            <h2 data-i18n="so.runs">Recent runs</h2>
+            <table class="tbl" id="so-runs"><thead><tr>
+              <th data-i18n="alerts.col.time">Time</th><th data-i18n="so.col.name">Playbook</th>
+              <th data-i18n="xdr.col.entity">Entity</th><th data-i18n="so.col.status">Status</th>
+            </tr></thead><tbody></tbody></table>
+            <p class="empty" id="so-empty" data-i18n="so.empty"></p>
           </div>
         </section>
 

@@ -411,25 +411,54 @@ _SUSPICIOUS_PROC = ("mimikatz", "ncat", "netcat", "xmrig", "cryptominer", "massc
                     "lazagne", "rubeus", "cobaltstrike", "metasploit", "meterpreter")
 
 
-def c_processes(policy):
-    """Inventori proses berjalan (Wazuh syscollector) + flag proses mencurigakan."""
+def _detailed_processes():
+    """Kumpulkan proses NYATA dengan pid/ppid/user/cmdline (untuk pohon proses EDR).
+    Linux: `ps`; Windows: PowerShell CIM (ppid) dgn fallback wmic/tasklist."""
     sysname = platform.system()
     procs = []
     if sysname == "Windows":
-        out = _run(["tasklist", "/fo", "csv", "/nh"])
+        # CIM memberi ParentProcessId (ppid) + CommandLine — inti pohon proses.
+        ps = ("Get-CimInstance Win32_Process | ForEach-Object { "
+              "\"$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.Name)`t$($_.CommandLine)\" }")
+        out = _run(["powershell", "-NoProfile", "-Command", ps])
         for line in out.splitlines():
-            cells = line.split('","')
-            if cells:
-                procs.append(cells[0].strip('"').strip())
+            parts = line.split("\t")
+            if len(parts) >= 3 and parts[0].strip().isdigit():
+                procs.append({"pid": int(parts[0]), "ppid": int(parts[1]) if parts[1].strip().isdigit() else 0,
+                              "name": parts[2].strip(), "user": "",
+                              "cmdline": parts[3].strip() if len(parts) > 3 else ""})
+        if not procs:                       # fallback tanpa ppid (wmic/tasklist)
+            out = _run(["wmic", "process", "get", "ProcessId,ParentProcessId,Name,CommandLine",
+                        "/format:csv"])
+            for line in out.splitlines()[1:]:
+                cells = line.split(",")
+                if len(cells) >= 4 and cells[-1].strip().isdigit():
+                    procs.append({"pid": int(cells[-1]), "ppid": int(cells[-2]) if cells[-2].strip().isdigit() else 0,
+                                  "name": cells[-3].strip(), "user": "",
+                                  "cmdline": cells[1].strip()})
     else:
-        out = _run(["ps", "-eo", "comm"])
-        procs = [l.strip() for l in out.splitlines()[1:] if l.strip()]
-    procs = [p for p in procs if p]
-    events = [{"type": "processes", "severity": "info", "event_type": "process_list",
-               "title": f"{len(procs)} proses berjalan",
-               "detail": ", ".join(sorted(set(procs))[:20]),
-               "data": {"count": len(procs)}}]
-    for p in sorted({x for x in procs if any(s in x.lower() for s in _SUSPICIOUS_PROC)}):
+        out = _run(["ps", "-eo", "pid,ppid,user:32,comm,args", "--no-headers"])
+        for line in out.splitlines():
+            parts = line.split(None, 4)
+            if len(parts) >= 4 and parts[0].isdigit():
+                procs.append({"pid": int(parts[0]), "ppid": int(parts[1]) if parts[1].isdigit() else 0,
+                              "user": parts[2], "name": parts[3],
+                              "cmdline": parts[4] if len(parts) > 4 else parts[3]})
+    return procs[:1000]
+
+
+def c_processes(policy):
+    """Inventori proses berjalan + snapshot pid/ppid (pohon proses EDR) + flag jahat."""
+    detailed = _detailed_processes()
+    names = [p["name"] for p in detailed if p.get("name")]
+    events = [{
+        "type": "processes", "severity": "info", "event_type": "process_snapshot",
+        "title": f"{len(detailed)} proses berjalan",
+        "detail": ", ".join(sorted(set(names))[:20]),
+        # data.processes = snapshot NYATA pid/ppid/cmdline -> manager bangun pohon EDR.
+        "data": {"count": len(detailed), "processes": detailed},
+    }]
+    for p in sorted({n for n in names if any(s in n.lower() for s in _SUSPICIOUS_PROC)}):
         events.append({"type": "processes", "severity": "high",
                        "event_type": "suspicious_process",
                        "title": f"Proses mencurigakan terdeteksi: {p}",
@@ -437,8 +466,39 @@ def c_processes(policy):
     return events
 
 
+def _connections():
+    """Koneksi jaringan AKTIF NYATA (src/dst/dport/proto) untuk NDR. Linux: `ss`;
+    Windows: `netstat -no`. Hanya koneksi keluar ber-peer (bukan listen)."""
+    flows = []
+    if platform.system() == "Windows":
+        out = _run(["netstat", "-no", "-p", "TCP"])
+        for line in out.splitlines():
+            p = line.split()
+            if len(p) >= 4 and p[0].upper() in ("TCP", "UDP") and ":" in p[2]:
+                la, ra = p[1], p[2]
+                src, _, _sp = la.rpartition(":")
+                dst, _, dp = ra.rpartition(":")
+                if dst and dp.isdigit() and dst not in ("0.0.0.0", "*", "[::]"):
+                    flows.append({"src": src, "dst": dst, "dport": int(dp),
+                                  "proto": p[0].lower(), "bytes": 0})
+    else:
+        out = _run(["ss", "-tunH", "state", "established"]) or _run(["netstat", "-tun"])
+        for line in out.splitlines():
+            cols = line.split()
+            if len(cols) < 5:
+                continue
+            proto = cols[0].lower() if cols[0].lower() in ("tcp", "udp") else "tcp"
+            la, ra = cols[-2], cols[-1]
+            src, _, _sp = la.rpartition(":")
+            dst, _, dp = ra.rpartition(":")
+            if dst and dp.isdigit():
+                flows.append({"src": src.strip("[]"), "dst": dst.strip("[]"),
+                              "dport": int(dp), "proto": proto, "bytes": 0})
+    return flows[:500]
+
+
 def c_network(policy):
-    """Inventori interface/alamat IP (Wazuh syscollector)."""
+    """Inventori interface/IP (syscollector) + snapshot koneksi aktif (NDR)."""
     if platform.system() == "Windows":
         out = _run(["ipconfig"])
         ips = set(_re.findall(r"IPv4.*?:\s*([\d.]+)", out))
@@ -446,9 +506,17 @@ def c_network(policy):
         out = _run(["ip", "-o", "addr"]) or _run(["ifconfig"])
         ips = set(_re.findall(r"inet\s+(?:addr:)?([\d.]+)", out))
     ips.discard("127.0.0.1")
-    return [{"type": "network", "severity": "info", "event_type": "network_inventory",
-             "title": f"{len(ips)} alamat IP pada host",
-             "detail": ", ".join(sorted(ips)) or "—", "data": {"ips": sorted(ips)}}]
+    events = [{"type": "network", "severity": "info", "event_type": "network_inventory",
+               "title": f"{len(ips)} alamat IP pada host",
+               "detail": ", ".join(sorted(ips)) or "—", "data": {"ips": sorted(ips)}}]
+    flows = _connections()
+    if flows:
+        # data.flows = koneksi NYATA -> manager (NDR) deteksi beaconing/scan/C2.
+        events.append({"type": "network", "severity": "info", "event_type": "network_snapshot",
+                       "title": f"{len(flows)} koneksi jaringan aktif",
+                       "detail": ", ".join(sorted({f['dst'] for f in flows})[:10]) or "—",
+                       "data": {"count": len(flows), "flows": flows}})
+    return events
 
 
 REGISTRY = {

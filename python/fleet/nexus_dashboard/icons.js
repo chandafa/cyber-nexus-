@@ -47,6 +47,22 @@ const ICON_PATHS = {
     '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   save:
     '<path d="M5 4h11l3 3v13H5V4Z"/><path d="M8 4v5h7V4M8 20v-6h8v6"/>',
+  xdr:
+    '<path d="M12 3 4 6v6c0 4.4 3.2 7.6 8 9 4.8-1.4 8-4.6 8-9V6l-8-3Z"/><circle cx="12" cy="11" r="1.8"/><path d="M12 9.2V6.5M12 12.8v2.7M13.8 11h2.4M7.8 11h2.4"/>',
+  ai:
+    '<rect x="6" y="6" width="12" height="12" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>',
+  edr:
+    '<circle cx="12" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="19" r="2"/><path d="M12 7v3.5M12 10.5H6V17M12 10.5h6V17"/>',
+  ueba:
+    '<circle cx="9" cy="8" r="3"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M17 13v6M20 10v9M14 16v3"/>',
+  intel:
+    '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
+  cloud:
+    '<path d="M7 18a4 4 0 0 1 0-8 5 5 0 0 1 9.6-1.3A3.5 3.5 0 0 1 18 18H7Z"/><path d="m9.5 14 1.8 1.8L15 12"/>',
+  soar:
+    '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5.2 5.2 7.3 7.3M16.7 16.7l2.1 2.1M18.8 5.2 16.7 7.3M7.3 16.7 5.2 18.8"/>',
+  ndr:
+    '<circle cx="5" cy="12" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7 12h4M17.3 7 13 11M17.3 17 13 13"/><circle cx="12" cy="12" r="1.6"/>',
 };
 
 /** Kembalikan markup SVG ikon Solar-style (24px, currentColor). */

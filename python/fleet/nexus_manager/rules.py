@@ -259,4 +259,44 @@ DEFAULT_RULES = [
         "recommendation": "Isolasi host, hentikan proses, audit persistensi & jalur masuk.",
         "response": ["notify", "create_incident"],
     },
+    {
+        "id": "NEXUS-TI-001", "name": "Indikator ancaman (IOC) cocok dengan telemetri",
+        "category": "threat_intel", "level": 13, "mitre": ["T1071"],
+        "conditions": {"event_type": "ioc_match"},
+        "recommendation": "Observable cocok dengan threat intel (C2/malware). Blokir "
+                          "IP/domain, isolasi host yang menghubungi, cari indikator lain.",
+        "response": ["notify", "create_incident"],
+    },
+    {
+        "id": "NEXUS-UEBA-001", "name": "Anomali perilaku entitas (UEBA)",
+        "category": "behavior_analytics", "level": 11, "mitre": ["T1078", "T1071"],
+        "conditions": {"event_type": "behavior_anomaly"},
+        "recommendation": "Perilaku entitas menyimpang dari baseline (lihat alasan pada "
+                          "evidence). Verifikasi apakah sah; bila tidak, selidiki akun/host.",
+        "response": ["notify", "create_incident"],
+    },
+    {
+        "id": "NEXUS-EDR-001", "name": "Garis keturunan proses mencurigakan (EDR)",
+        "category": "process_activity", "level": 13, "mitre": ["T1059", "T1055"],
+        "conditions": {"event_type": "suspicious_lineage"},
+        "recommendation": "Induk→anak proses tak wajar (mis. server web → shell). "
+                          "Periksa webshell/eksploitasi, hentikan rantai proses, isolasi host.",
+        "response": ["notify", "create_incident"],
+    },
+    {
+        "id": "NEXUS-CLOUD-001", "name": "Kesalahan konfigurasi cloud berisiko (CSPM)",
+        "category": "cloud_posture", "level": 12, "mitre": ["T1078.004", "T1530"],
+        "conditions": {"event_type": "cloud_finding", "severity_gte": "high"},
+        "recommendation": "Sumber daya cloud salah konfigurasi (lihat remediasi pada "
+                          "evidence). Perbaiki sesuai CIS; tutup akses publik/port admin.",
+        "response": ["notify", "create_incident"],
+    },
+    {
+        "id": "NEXUS-NDR-001", "name": "Ancaman jaringan terdeteksi (NDR)",
+        "category": "network_activity", "level": 13, "mitre": ["T1071", "T1046"],
+        "conditions": {"event_type": "network_threat"},
+        "recommendation": "Lalu lintas mencurigakan (beaconing C2/scan/koneksi IOC). "
+                          "Blokir IP tujuan, isolasi host, periksa proses pengirim.",
+        "response": ["notify", "create_incident"],
+    },
 ]

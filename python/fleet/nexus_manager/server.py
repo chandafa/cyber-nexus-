@@ -184,6 +184,22 @@ def init_db():
         );
         """
     )
+    # Siapkan tabel SecOps (XDR/SOAR/Threat-Intel) di koneksi yang SAMA agar skema
+    # ter-bootstrap sekali & tak ada lock antar-koneksi saat ingest.
+    try:
+        from nexus_secops import correlate as _xdr, soar as _soar, threatintel as _ti
+        from nexus_secops import ueba as _ueba, ai as _ai, edr as _edr, cloud as _cloud
+        from nexus_secops import ndr as _ndr
+        _xdr.ensure_tables(c)
+        _soar.ensure_tables(c)
+        _ti.ensure_tables(c)
+        _ueba.ensure_tables(c)
+        _ai.ensure_tables(c)
+        _edr.ensure_tables(c)
+        _cloud.ensure_tables(c)
+        _ndr.ensure_tables(c)
+    except Exception:
+        pass
     c.commit()
     _migrate(c)
     c.close()
@@ -441,13 +457,63 @@ def _ingest_events(agent_id, body) -> tuple:
             ds, da = _correlate_vulns(c, ev, ruleset, agent_id, tenant, host)
             stored += ds
             n_alerts += da
+        # Threat Intelligence: cocokkan observable event NYATA dgn IOC store -> alert.
+        if licensing.has(ent(), "advanced_rules"):
+            ds, da = _run_threatintel(c, ev, ruleset, agent_id, tenant, host)
+            stored += ds
+            n_alerts += da
+        # EDR: snapshot proses NYATA (pid/ppid) -> pohon proses + deteksi garis keturunan.
+        if ev.get("event_type") == "process_snapshot":
+            ds, da = _run_edr(c, ev, ruleset, agent_id, tenant, host)
+            stored += ds
+            n_alerts += da
+        # NDR: snapshot koneksi NYATA -> deteksi beaconing/scan/C2.
+        if ev.get("event_type") == "network_snapshot":
+            ds, da = _run_ndr(c, ev, ruleset, agent_id, tenant, host)
+            stored += ds
+            n_alerts += da
     c.execute("UPDATE agents SET last_seen=? WHERE agent_id=?", (fc.now(), agent_id))
     c.commit(); c.close()
     _prune()
+    # XDR correlation (nexus_secops): bila ada alert baru, gabungkan sinyal lintas-
+    # waktu menjadi insiden ber-kill-chain. Beroperasi atas tabel `alerts` NYATA
+    # (demo sudah ditolak di atas) — bukan simulasi. Best-effort & non-fatal.
+    incidents_xdr = soar_runs = 0
+    if n_alerts:
+        try:
+            from nexus_secops import correlate as _xdr
+            r = _xdr.correlate(lookback=21600, tenant=tenant)   # jendela 6 jam
+            incidents_xdr = r.get("created", 0) + r.get("updated", 0)
+            if r.get("fired"):
+                log(f"[MANAGER] XDR: {r['created']} insiden baru, {r['updated']} diperbarui "
+                    f"dari {r['scanned_alerts']} alert.")
+            # AI triase otomatis insiden yang baru terbentuk/diperbarui (lokal, tanpa token).
+            ids = [f["id"] for f in r.get("fired", [])]
+            if ids:
+                try:
+                    from nexus_secops import ai as _ai
+                    _ai.triage_incidents(ids, tenant=tenant)
+                except Exception as e:
+                    log(f"[MANAGER] AI triase dilewati: {e}")
+        except Exception as e:
+            log(f"[MANAGER] Korelasi XDR dilewati: {e}")
+        # SOAR: jalankan playbook terhadap alert+insiden NYATA (aksi destruktif default
+        # dry-run; lihat nexus_secops/soar.py). Idempoten via dedup. Best-effort.
+        try:
+            from nexus_secops import soar as _soar
+            sr = _soar.process(lookback=21600, tenant=tenant)
+            soar_runs = sr.get("fired", 0)
+            if soar_runs:
+                log(f"[MANAGER] SOAR: {soar_runs} playbook dijalankan "
+                    f"({sr.get('executed', 0)} mengeksekusi aksi nyata).")
+        except Exception as e:
+            log(f"[MANAGER] SOAR dilewati: {e}")
     if stored:
         log(f"[MANAGER] {stored} event dari {agent_id} -> {n_alerts} alert"
             + (f" ({skipped} demo ditolak)" if skipped else ""))
-    return 200, {"ok": True, "stored": stored, "alerts": n_alerts, "skipped_demo": skipped}
+    return 200, {"ok": True, "stored": stored, "alerts": n_alerts,
+                 "skipped_demo": skipped, "xdr_incidents": incidents_xdr,
+                 "soar_runs": soar_runs}
 
 
 DEDUP_WINDOW = 3600   # detik: alert sama (rule+agent+target) tidak diulang dlm 1 jam
@@ -538,6 +604,290 @@ def _correlate_vulns(c, inv_ev, ruleset, agent_id, tenant, host):
     if findings:
         log(f"[MANAGER] Vuln detection: {len(findings)} CVE cocok dari inventori {agent_id}")
     return n_ev, n_al
+
+
+def _run_threatintel(c, src_ev, ruleset, agent_id, tenant, host):
+    """Cocokkan observable event NYATA dgn IOC store (nexus_secops.threatintel).
+    Tiap kecocokan BARU -> event 'ioc_match' yang dijalankan lewat rule engine
+    (rule NEXUS-TI-001) sehingga mengalir ke alert -> XDR -> SOAR. Non-fatal."""
+    try:
+        from nexus_secops import threatintel as ti
+    except Exception as e:
+        log(f"[MANAGER] Threat Intel dilewati: {e}")
+        return 0, 0
+    try:
+        hits = ti.match_event(src_ev, tenant, conn=c)   # transaksi yang sama (anti-lock)
+    except Exception as e:
+        log(f"[MANAGER] Threat Intel match gagal: {e}")
+        return 0, 0
+    n_ev = n_al = 0
+    for h in hits:
+        if not h.get("new", True):
+            continue
+        is_ip = h["type"] == "ip"
+        tev = schema.normalize_event({
+            "type": "threat_intel", "source": "threatintel", "severity": h["severity"],
+            "event_type": "ioc_match",
+            "title": f"IOC cocok: {h['type']} {h['value']} ({h['threat']})",
+            "detail": f"Observable {h['value']} cocok IOC dari sumber '{h['source']}' "
+                      f"(confidence {h['confidence']}).",
+            "target": {h["type"]: h["value"], "ip": h["value"] if is_ip else ""},
+            "evidence": {"ioc_id": h["ioc_id"], "ioc_type": h["type"], "ioc_value": h["value"],
+                         "threat": h["threat"], "source": h["source"],
+                         "src_ip": h["value"] if is_ip else "",
+                         "matched_event": src_ev.get("event_id", "")},
+            "origin": "real"})
+        tev = schema.enrich_event(tev, agent_id=agent_id, tenant_id=tenant, host=host)
+        _insert_event(c, tev, agent_id, tenant, host)
+        n_ev += 1
+        n_al += _run_rules(c, tev, ruleset, agent_id, tenant)
+    if n_ev:
+        log(f"[MANAGER] Threat Intel: {n_ev} IOC cocok pada telemetri {agent_id}")
+    return n_ev, n_al
+
+
+def _run_edr(c, ev, ruleset, agent_id, tenant, host):
+    """Proses snapshot proses NYATA (nexus_secops.edr): simpan inventori utk pohon
+    proses, deteksi garis keturunan mencurigakan -> event suspicious_lineage ->
+    rule NEXUS-EDR-001 -> alert -> XDR/SOAR/AI. Non-fatal."""
+    procs = (ev.get("data") or {}).get("processes") or []
+    if not procs:
+        return 0, 0
+    try:
+        from nexus_secops import edr
+        findings = edr.ingest_snapshot(agent_id, procs, tenant, conn=c)   # transaksi sama
+    except Exception as e:
+        log(f"[MANAGER] EDR dilewati: {e}")
+        return 0, 0
+    n_ev = n_al = 0
+    for f in findings:
+        lev = schema.normalize_event({
+            "type": "process_tree", "source": "edr", "severity": f["severity"],
+            "event_type": "suspicious_lineage",
+            "title": f"Garis keturunan mencurigakan: {f['chain']} ({f['rule']})",
+            "detail": f"{f['rule']}. Rantai {f['chain']}; cmd: {f['cmdline'][:160]}",
+            "target": {"process": f["name"], "parent": f["parent_name"],
+                       "pid": f["pid"], "ppid": f["ppid"]},
+            "evidence": {"chain": f["chain"], "cmdline": f["cmdline"], "user": f["user"],
+                         "mitre": f["mitre"], "pid": f["pid"], "ppid": f["ppid"]},
+            "origin": "real"})
+        lev = schema.enrich_event(lev, agent_id=agent_id, tenant_id=tenant, host=host)
+        _insert_event(c, lev, agent_id, tenant, host)
+        n_ev += 1
+        n_al += _run_rules(c, lev, ruleset, agent_id, tenant)
+    if n_ev:
+        log(f"[MANAGER] EDR: {n_ev} garis keturunan mencurigakan pada {agent_id}")
+    return n_ev, n_al
+
+
+def _run_ndr(c, ev, ruleset, agent_id, tenant, host):
+    """Proses snapshot koneksi NYATA (nexus_secops.ndr): simpan observasi flow +
+    deteksi beaconing/scan/C2 -> event network_threat -> NEXUS-NDR-001 -> XDR/SOAR/AI."""
+    flows = (ev.get("data") or {}).get("flows") or []
+    if not flows:
+        return 0, 0
+    try:
+        from nexus_secops import ndr
+        findings = ndr.ingest_flows(agent_id, flows, tenant, conn=c)   # transaksi sama
+    except Exception as e:
+        log(f"[MANAGER] NDR dilewati: {e}")
+        return 0, 0
+    n_ev = n_al = 0
+    for f in findings:
+        nev = schema.normalize_event({
+            "type": "network_threat", "source": "ndr", "severity": f["severity"],
+            "event_type": "network_threat",
+            "title": f"Ancaman jaringan ({f['kind']}): {f['detail']}",
+            "detail": f["detail"],
+            "target": {"ip": f["dst"], "dst": f["dst"], "dport": f.get("dport", 0),
+                       "kind": f["kind"]},
+            "evidence": {**f.get("evidence", {}), "src_ip": f["dst"], "mitre": f["mitre"],
+                         "kind": f["kind"]},
+            "origin": "real"})
+        nev = schema.enrich_event(nev, agent_id=agent_id, tenant_id=tenant, host=host)
+        _insert_event(c, nev, agent_id, tenant, host)
+        n_ev += 1
+        n_al += _run_rules(c, nev, ruleset, agent_id, tenant)
+    if n_ev:
+        log(f"[MANAGER] NDR: {n_ev} ancaman jaringan pada {agent_id}")
+    return n_ev, n_al
+
+
+def threatintel_scan(lookback=604800) -> dict:
+    """Retro-hunt: pindai event NYATA `lookback` detik terakhir terhadap IOC store,
+    buat alert utk kecocokan BARU (berguna setelah menambah feed). Lalu jalankan
+    korelasi XDR + SOAR atas alert baru."""
+    init_db()
+    tenant = _get_cfg("tenant") or "default"
+    ruleset = get_rules()
+    c = _conn()
+    rows = c.execute("SELECT * FROM events WHERE ts>=? AND type!='threat_intel' "
+                     "ORDER BY id ASC", (fc.now() - int(lookback),)).fetchall()
+    n_ev = n_al = scanned = 0
+    for r in rows:
+        ev = {"event_id": r["event_id"], "agent_id": r["agent_id"], "title": r["title"],
+              "detail": r["detail"], "target": _safe_json(r["target"]),
+              "evidence": _safe_json(r["evidence"]), "data": _safe_json(r["data"]),
+              "host": _safe_json(r["host"]) if "host" in r.keys() else {}}
+        de, da = _run_threatintel(c, ev, ruleset, r["agent_id"], tenant, ev["host"])
+        n_ev += de; n_al += da; scanned += 1
+    c.commit(); c.close()
+    if n_al:
+        try:
+            from nexus_secops import correlate as _xdr
+            _xdr.correlate(lookback=int(lookback), tenant=tenant)
+            from nexus_secops import soar as _soar
+            _soar.process(lookback=int(lookback), tenant=tenant)
+        except Exception as e:
+            log(f"[MANAGER] Pasca retro-hunt (XDR/SOAR) dilewati: {e}")
+    return {"module": "fleet_manager", "ok": True, "scanned": scanned,
+            "ti_events": n_ev, "ti_alerts": n_al}
+
+
+def ueba_train(lookback=1209600) -> dict:
+    """Latih baseline perilaku UEBA dari event NYATA `lookback` detik terakhir."""
+    init_db()
+    from nexus_secops import ueba
+    return ueba.train(int(lookback), tenant=_get_cfg("tenant") or "default")
+
+
+def ueba_scan(window=86400, emit=True) -> dict:
+    """Skor anomali perilaku semua entitas. emit=True: anomali band 'high' diubah
+    jadi event `behavior_anomaly` NYATA → rule NEXUS-UEBA-001 → alert → XDR/SOAR."""
+    init_db()
+    from nexus_secops import ueba
+    tenant = _get_cfg("tenant") or "default"
+    res = ueba.score(int(window), tenant=tenant)
+    ruleset = get_rules()
+    emitted = 0
+    c = _conn()
+    for ent in res.get("entities", []):
+        if not emit or ent["band"] != "high":
+            continue
+        sev = ueba.band_to_severity(ent["band"])
+        reasons = "; ".join(r["detail"] for r in ent["reasons"])
+        bev = schema.normalize_event({
+            "type": "behavior_anomaly", "source": "ueba", "severity": sev,
+            "event_type": "behavior_anomaly",
+            "title": f"Anomali perilaku: {ent['entity']} (skor {ent['score']})",
+            "detail": f"Entitas {ent['entity']} menyimpang dari baseline — {reasons}.",
+            "target": {"entity": ent["entity"]},
+            "evidence": {"score": ent["score"], "band": ent["band"],
+                         "reasons": ent["reasons"], "window_events": ent["window_events"]},
+            "origin": "real"})
+        host = _host_for(ent["entity"])
+        bev = schema.enrich_event(bev, agent_id=ent["entity"], tenant_id=tenant, host=host)
+        _insert_event(c, bev, ent["entity"], tenant, host)
+        _run_rules(c, bev, ruleset, ent["entity"], tenant)
+        emitted += 1
+    c.commit(); c.close()
+    if emitted:
+        try:
+            from nexus_secops import correlate as _xdr
+            _xdr.correlate(lookback=max(int(window), 7200), tenant=tenant)
+            from nexus_secops import soar as _soar
+            _soar.process(lookback=max(int(window), 21600), tenant=tenant)
+        except Exception as e:
+            log(f"[MANAGER] Pasca UEBA (XDR/SOAR) dilewati: {e}")
+        log(f"[MANAGER] UEBA: {emitted} anomali perilaku berisiko tinggi di-emit.")
+    return {"module": "fleet_manager", "ok": True, "scored": res.get("scored", 0),
+            "emitted": emitted, "entities": res.get("entities", [])}
+
+
+def cloud_scan(resources=None, prowler=None, provider="aws", account="default") -> dict:
+    """CSPM: nilai konfigurasi cloud (resources) ATAU impor keluaran Prowler, simpan
+    temuan, lalu emit event `cloud_finding` NYATA → rule NEXUS-CLOUD-001 → alert →
+    XDR/SOAR/AI. resources/prowler boleh string JSON atau objek."""
+    init_db()
+    from nexus_secops import cloud
+    tenant = _get_cfg("tenant") or "default"
+    if isinstance(resources, str):
+        try:
+            resources = json.loads(resources) if resources else None
+        except Exception as e:
+            return {"module": "fleet_manager", "ok": False, "error": f"resources JSON: {e}"}
+    if prowler is not None:
+        r = cloud.import_prowler(prowler, provider, account)
+        if not r.get("ok"):
+            return {"module": "fleet_manager", **r}
+        findings = r["findings"]
+    else:
+        findings = cloud.evaluate(resources or [], provider, account)["findings"]
+    ruleset = get_rules()
+    c = _conn()
+    cloud.store_findings(findings, tenant, conn=c)
+    n_ev = n_al = 0
+    for f in findings:
+        cev = schema.normalize_event({
+            "type": "cloud_posture", "source": "cspm", "severity": f["severity"],
+            "event_type": "cloud_finding",
+            "title": f"[{f.get('provider','')}/{f.get('account','')}] {f['title']} — {f['resource']}",
+            "detail": f"{f['title']} ({f.get('compliance','')}). Remediasi: {f.get('remediation','')}",
+            "target": {"resource": f["resource"], "resource_type": f.get("resource_type", "cloud"),
+                       "provider": f.get("provider", ""), "account": f.get("account", "")},
+            "evidence": {"check_id": f["check_id"], "compliance": f.get("compliance", ""),
+                         "remediation": f.get("remediation", "")},
+            "origin": "real"})
+        cev = schema.enrich_event(cev, agent_id="cloud:" + f.get("account", "default"),
+                                  tenant_id=tenant, host={})
+        _insert_event(c, cev, "cloud:" + f.get("account", "default"), tenant, {})
+        n_ev += 1
+        n_al += _run_rules(c, cev, ruleset, "cloud:" + f.get("account", "default"), tenant)
+    c.commit(); c.close()
+    if n_al:
+        try:
+            from nexus_secops import correlate as _xdr
+            _xdr.correlate(lookback=86400, tenant=tenant)
+            from nexus_secops import soar as _soar
+            _soar.process(lookback=86400, tenant=tenant)
+        except Exception as e:
+            log(f"[MANAGER] Pasca CSPM (XDR/SOAR) dilewati: {e}")
+    log(f"[MANAGER] CSPM: {len(findings)} temuan, {n_al} alert dari konfigurasi cloud.")
+    return {"module": "fleet_manager", "ok": True, "findings": len(findings),
+            "alerts": n_al, "posture": cloud.posture(tenant)}
+
+
+def cloud_findings(provider="", severity="", status="") -> dict:
+    from nexus_secops import cloud
+    return cloud.list_findings(provider, severity, status, 500, _get_cfg("tenant") or "default")
+
+
+def cloud_posture() -> dict:
+    from nexus_secops import cloud
+    return cloud.posture(_get_cfg("tenant") or "default")
+
+
+def ai_train() -> dict:
+    init_db()
+    from nexus_secops import ai
+    return ai.train(_get_cfg("tenant") or "default")
+
+
+def ai_triage_all(status="open") -> dict:
+    init_db()
+    from nexus_secops import ai
+    return ai.triage_all(status, 200, _get_cfg("tenant") or "default")
+
+
+def ai_triage(incident_id) -> dict:
+    init_db()
+    from nexus_secops import ai
+    return ai.triage_incident(incident_id, _get_cfg("tenant") or "default")
+
+
+def ai_list(priority="") -> dict:
+    from nexus_secops import ai
+    return ai.list_triage(200, priority, _get_cfg("tenant") or "default")
+
+
+def ai_nl(text) -> dict:
+    from nexus_secops import ai
+    return ai.nl_query(text)
+
+
+def ai_status() -> dict:
+    from nexus_secops import ai
+    return ai.model_status(_get_cfg("tenant") or "default")
 
 
 def get_vulndb() -> list:
@@ -719,6 +1069,82 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/vulndb":
             r = set_vulndb(body.get("vuln_db", body))
             return self._send(200 if r.get("ok") else 400, r)
+        if path == "/xdr/ack":
+            from nexus_secops import correlate as xdr
+            r = xdr.ack_incident(body.get("id", ""), body.get("status", "ack"))
+            _audit("admin", "xdr:" + body.get("status", "ack"), body.get("id", ""))
+            return self._send(200 if r.get("ok") else 404, r)
+        if path == "/xdr/correlate":
+            from nexus_secops import correlate as xdr
+            r = xdr.correlate(int(body.get("lookback", 86400)),
+                              tenant=_get_cfg("tenant") or "default")
+            return self._send(200, r)
+        if path == "/soar/playbook":
+            from nexus_secops import soar
+            r = soar.save_playbook(body.get("playbook", body),
+                                   _get_cfg("tenant") or "default")
+            _audit("admin", "soar:save", r.get("id", ""))
+            return self._send(200 if r.get("ok") else 400, r)
+        if path == "/soar/playbook/enable":
+            from nexus_secops import soar
+            r = soar.set_enabled(body.get("id", ""), bool(body.get("enabled", True)))
+            return self._send(200 if r.get("ok") else 404, r)
+        if path == "/soar/playbook/mode":
+            from nexus_secops import soar
+            r = soar.set_mode(body.get("id", ""), body.get("mode", "dry_run"))
+            _audit("admin", "soar:mode", f"{body.get('id', '')} -> {body.get('mode', '')}")
+            return self._send(200 if r.get("ok") else 400, r)
+        if path == "/soar/playbook/delete":
+            from nexus_secops import soar
+            r = soar.delete_playbook(body.get("id", ""))
+            return self._send(200 if r.get("ok") else 404, r)
+        if path == "/soar/run":
+            from nexus_secops import soar
+            r = soar.run_now(body.get("id", ""), body.get("ref_id", ""),
+                             _get_cfg("tenant") or "default")
+            _audit("admin", "soar:run", f"{body.get('id', '')} / {body.get('ref_id', '')}")
+            return self._send(200 if r.get("ok") else 400, r)
+        if path == "/ti/iocs":
+            from nexus_secops import threatintel as ti
+            r = ti.add_iocs(body.get("iocs", []), body.get("source", "manual"),
+                            _get_cfg("tenant") or "default")
+            _audit("admin", "ti:add", f"{r.get('added', 0)}+{r.get('updated', 0)}")
+            return self._send(200 if r.get("ok") else 400, r)
+        if path == "/ti/import":
+            from nexus_secops import threatintel as ti
+            r = ti.import_feed(body.get("url", ""), body.get("fmt", "text"),
+                               body.get("source"), body.get("threat", "feed"),
+                               body.get("severity", "high"), int(body.get("col", 0)),
+                               _get_cfg("tenant") or "default")
+            _audit("admin", "ti:import", body.get("url", "")[:80])
+            return self._send(200 if r.get("ok") else 400, r)
+        if path == "/ti/delete":
+            from nexus_secops import threatintel as ti
+            r = ti.delete_ioc(body.get("id", ""))
+            return self._send(200 if r.get("ok") else 404, r)
+        if path == "/ti/scan":
+            r = threatintel_scan(int(body.get("lookback", 604800)))
+            return self._send(200, r)
+        if path == "/ueba/train":
+            r = ueba_train(int(body.get("lookback", 1209600)))
+            _audit("admin", "ueba:train", str(r.get("trained", 0)))
+            return self._send(200, r)
+        if path == "/ueba/scan":
+            r = ueba_scan(int(body.get("window", 86400)),
+                          bool(body.get("emit", True)))
+            return self._send(200, r)
+        if path == "/ai/train":
+            r = ai_train()
+            _audit("admin", "ai:train", str(r.get("samples", 0)))
+            return self._send(200, r)
+        if path == "/ai/triage":
+            iid = body.get("id", "")
+            r = ai_triage(iid) if iid else ai_triage_all(body.get("status", "open"))
+            return self._send(200, r)
+        if path == "/cloud/scan":
+            r = cloud_scan(body.get("resources"), body.get("prowler"),
+                           body.get("provider", "aws"), body.get("account", "default"))
+            return self._send(200 if r.get("ok") else 400, r)
         return self._send(404, {"error": "endpoint tidak dikenal"})
 
     def do_GET(self):
@@ -749,6 +1175,104 @@ class _Handler(BaseHTTPRequestHandler):
             q = up.parse_qs(self.path.split("?", 1)[1])
             return (q.get(name, [default]) or [default])[0]
 
+        # --- Nexus SecOps: SIEM search + XDR incidents (lapisan analitik) ---
+        if path == "/search":
+            from nexus_secops import siem
+            return self._send(200, siem.search(_q("index", "events"), _q("q", ""),
+                                               int(_q("limit", "200")), _q("order", "desc")))
+        if path == "/siem/stats":
+            from nexus_secops import siem
+            return self._send(200, siem.stats(_q("index", "events"), _q("q", ""),
+                                              int(_q("buckets", "24")),
+                                              _q("top_field", "event_type"),
+                                              int(_q("top_n", "10"))))
+        if path == "/xdr/incidents":
+            from nexus_secops import correlate as xdr
+            return self._send(200, xdr.list_incidents(_q("status", ""),
+                                                      int(_q("limit", "200")),
+                                                      _get_cfg("tenant") or "default"))
+        if path == "/xdr/incident":
+            from nexus_secops import correlate as xdr
+            r = xdr.get_incident(_q("id", ""), _get_cfg("tenant") or "default")
+            return self._send(200 if r.get("ok") else 404, r)
+        if path == "/soar/playbooks":
+            from nexus_secops import soar
+            return self._send(200, soar.list_playbooks(_get_cfg("tenant") or "default"))
+        if path == "/soar/runs":
+            from nexus_secops import soar
+            return self._send(200, soar.list_runs(int(_q("limit", "200")),
+                                                  _get_cfg("tenant") or "default"))
+        if path == "/ti/iocs":
+            from nexus_secops import threatintel as ti
+            return self._send(200, ti.list_iocs(_q("type", ""), _q("q", ""),
+                                                int(_q("limit", "500")),
+                                                _get_cfg("tenant") or "default"))
+        if path == "/ti/matches":
+            from nexus_secops import threatintel as ti
+            return self._send(200, ti.list_matches(int(_q("limit", "200")),
+                                                   _get_cfg("tenant") or "default"))
+        if path == "/ti/stats":
+            from nexus_secops import threatintel as ti
+            return self._send(200, ti.stats(_get_cfg("tenant") or "default"))
+        if path == "/ueba/baselines":
+            from nexus_secops import ueba
+            return self._send(200, ueba.list_baselines(_get_cfg("tenant") or "default"))
+        if path == "/ueba/scores":
+            from nexus_secops import ueba
+            return self._send(200, ueba.list_scores(int(_q("limit", "200")), _q("band", ""),
+                                                    _get_cfg("tenant") or "default"))
+        if path == "/ueba/peers":
+            from nexus_secops import ueba
+            return self._send(200, ueba.peer_analysis(int(_q("window", "86400")),
+                                                      _get_cfg("tenant") or "default"))
+        if path == "/ai/triage":
+            from nexus_secops import ai
+            return self._send(200, ai.list_triage(int(_q("limit", "200")), _q("priority", ""),
+                                                  _get_cfg("tenant") or "default"))
+        if path == "/ai/incident":
+            from nexus_secops import ai
+            r = ai.triage_incident(_q("id", ""), _get_cfg("tenant") or "default", record=False)
+            return self._send(200 if r.get("ok") else 404, r)
+        if path == "/ai/model":
+            return self._send(200, ai_status())
+        if path == "/ai/nl":
+            return self._send(200, ai_nl(_q("q", "")))
+        if path == "/edr/hosts":
+            from nexus_secops import edr
+            return self._send(200, edr.hosts(_get_cfg("tenant") or "default"))
+        if path == "/edr/tree":
+            from nexus_secops import edr
+            return self._send(200, edr.build_tree(_q("agent_id", ""),
+                                                  _get_cfg("tenant") or "default"))
+        if path == "/edr/processes":
+            from nexus_secops import edr
+            return self._send(200, edr.list_processes(_q("agent_id", ""), _q("q", ""),
+                                                      _get_cfg("tenant") or "default"))
+        if path == "/edr/ancestry":
+            from nexus_secops import edr
+            return self._send(200, edr.ancestry(_q("agent_id", ""), _q("pid", "0"),
+                                                _get_cfg("tenant") or "default"))
+        if path == "/cloud/findings":
+            from nexus_secops import cloud
+            return self._send(200, cloud.list_findings(_q("provider", ""), _q("severity", ""),
+                                                       _q("status", ""), int(_q("limit", "500")),
+                                                       _get_cfg("tenant") or "default"))
+        if path == "/cloud/posture":
+            return self._send(200, cloud_posture())
+        if path == "/cloud/stats":
+            from nexus_secops import cloud
+            return self._send(200, cloud.stats(_get_cfg("tenant") or "default"))
+        if path == "/ndr/flows":
+            from nexus_secops import ndr
+            return self._send(200, ndr.list_flows(_q("agent_id", ""), int(_q("limit", "500")),
+                                                  _get_cfg("tenant") or "default"))
+        if path == "/ndr/talkers":
+            from nexus_secops import ndr
+            return self._send(200, ndr.top_talkers(int(_q("window", "86400")),
+                                                   _get_cfg("tenant") or "default"))
+        if path == "/ndr/stats":
+            from nexus_secops import ndr
+            return self._send(200, ndr.stats(_get_cfg("tenant") or "default"))
         if path == "/agents":
             return self._send(200, {"agents": list_agents()["agents"]})
         if path == "/events":
@@ -1194,7 +1718,21 @@ def _start_server(host, port):
     _THREAD = threading.Thread(target=_SERVER.serve_forever, daemon=True)
     _THREAD.start()
     _banner(host, port)
+    _ai_autostart()
     return True
+
+
+def _ai_autostart():
+    """AI LOKAL hidup begitu manager dijalankan: latih dari data yang ada lalu
+    triase insiden terbuka. Tanpa API/token. Non-fatal."""
+    try:
+        from nexus_secops import ai
+        r = ai.autostart(_get_cfg("tenant") or "default")
+        if r.get("ok"):
+            log(f"[MANAGER] Nexus AI aktif (lokal) — model {'terlatih' if r.get('trained') else 'mengumpulkan data'}"
+                f" ({r.get('samples', 0)} sampel), {r.get('triaged', 0)} insiden ditriase.")
+    except Exception as e:
+        log(f"[MANAGER] Nexus AI autostart dilewati: {e}")
 
 
 def run(host=fc.DEFAULT_MANAGER_HOST, port=str(fc.DEFAULT_MANAGER_PORT), **kwargs) -> dict:

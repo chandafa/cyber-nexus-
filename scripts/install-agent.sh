@@ -60,15 +60,44 @@ elif [ -f "./nexus-agent" ]; then
     echo -e "[*] Menyalin binary lokal..."
     cp ./nexus-agent /usr/bin/nexus-agent
 else
-    echo -e "${YELLOW}[!] Binary nexus-agent tidak ditemukan lokal. Menggunakan mock placeholder.${NC}"
-    # Buat file executable tiruan jika binary belum dicompile untuk keperluan installer scaffolding
-    cat <<EOF > /usr/bin/nexus-agent
+    echo -e "${YELLOW}[*] Binary nexus-agent native tak ada — memasang agen ringan (bash) dengan telemetri NYATA.${NC}"
+    # Agen ringan: membaca CPU/RAM/uptime ASLI dari /proc lalu mengirim heartbeat ke
+    # Manager via /dev/tcp (tanpa dependensi). Heredoc DIKUTIP ('AGENT_EOF') agar isi
+    # skrip literal; konfigurasi dibaca saat runtime dari /etc/nexus/agent.toml.
+    cat <<'AGENT_EOF' > /usr/bin/nexus-agent
 #!/bin/bash
-echo "[Nexus Agent Mock] Berjalan di latar belakang. Manager: $MANAGER_IP"
+# Nexus Agent (ringan, telemetri NYATA) — menyambung ke tab "Nexus Agents".
+CFG=/etc/nexus/agent.toml
+MANAGER_IP=$(awk -F'"' '/manager_ip/{print $2}' "$CFG" 2>/dev/null)
+PORT=$(awk -F'=' '/port_data/{gsub(/[^0-9]/,"",$2);print $2}' "$CFG" 2>/dev/null)
+NAME=$(awk -F'"' '/agent_name/{print $2}' "$CFG" 2>/dev/null)
+[ -z "$MANAGER_IP" ] && MANAGER_IP=127.0.0.1
+[ -z "$PORT" ] && PORT=1514
+[ -z "$NAME" ] && NAME=$(hostname)
+
+cpu_pct(){ local a b c d e f g h i1 t1 i2 t2 dt di
+  read -r _ a b c d e f g h _ < /proc/stat; i1=$d; t1=$((a+b+c+d+e+f+g+h))
+  sleep 1
+  read -r _ a b c d e f g h _ < /proc/stat; i2=$d; t2=$((a+b+c+d+e+f+g+h))
+  dt=$((t2-t1)); di=$((i2-i1)); [ "$dt" -gt 0 ] && echo $(((100*(dt-di))/dt)) || echo 0; }
+ram_pct(){ local t a; t=$(awk '/^MemTotal/{print $2}' /proc/meminfo); a=$(awk '/^MemAvailable/{print $2}' /proc/meminfo)
+  [ -n "$t" ] && [ "$t" -gt 0 ] && echo $(((100*(t-a))/t)) || echo 0; }
+up_str(){ local u; read -r u _ < /proc/uptime; u=${u%.*}; echo "$((u/86400))d $(((u%86400)/3600))h"; }
+
+echo "[nexus-agent] target $MANAGER_IP:$PORT (host $NAME)"
 while true; do
-    sleep 10
+  if exec 3<>"/dev/tcp/$MANAGER_IP/$PORT" 2>/dev/null; then
+    echo "[nexus-agent] tersambung ke $MANAGER_IP:$PORT"
+    while :; do
+      printf 'HEARTBEAT STATS: CPU:%s%% | RAM:%s%% | eBPF Blocked:0 IPs | Uptime:%s\n' \
+        "$(cpu_pct)" "$(ram_pct)" "$(up_str)" >&3 2>/dev/null || break
+      sleep 4
+    done
+    exec 3>&- 2>/dev/null
+  fi
+  sleep 5
 done
-EOF
+AGENT_EOF
     chmod +x /usr/bin/nexus-agent
 fi
 

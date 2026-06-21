@@ -1,9 +1,11 @@
 <div align="center">
 
-# Nexus Fleet
+# Nexus Fleet + SecOps
 
 **Lightweight, developer-first security platform for endpoints, servers, and web apps.**
-Agent · Manager · CLI · Dashboard — a Wazuh-style architecture you can `pip install`.
+Agent · Manager · CLI · Dashboard — a Wazuh-style architecture you can `pip install`,
+now with a full **SecOps SOC brain**: SIEM · XDR · EDR · UEBA · SOAR · Threat Intel · NDR ·
+Cloud CSPM · **local AI triage** (no external API).
 
 [![PyPI](https://img.shields.io/pypi/v/nexus-fleet?logo=pypi&logoColor=white)](https://pypi.org/project/nexus-fleet/)
 [![npm](https://img.shields.io/npm/v/nexus-fleet?logo=npm)](https://www.npmjs.com/package/nexus-fleet)
@@ -45,6 +47,15 @@ The agent is **pure-Python (stdlib only)** — deploy it on any host with Python
 | **Detection** | Rule engine (level 0–15 + MITRE ATT&CK), **Sigma import**, log decoders, **Vulnerability Detection** (inventory ↔ CVE) |
 | **Response** | Alert engine with deduplication, ack/resolve, **Active Response** (block IP, dry-run by default), audit log |
 | **Operations** | Multi-agent management, central policy, store-and-forward offline buffering, consistent reports, posture score |
+| **SecOps — SIEM** | NQL query language + aggregations over the event/alert store (`nexus_secops.siem`) |
+| **SecOps — XDR** | Cross-event, time-windowed correlation → kill-chain incidents (`correlate`) |
+| **SecOps — EDR** | Real process tree (pid/ppid) + suspicious-lineage detection (`edr`) |
+| **SecOps — UEBA** | Per-entity behavioral baselines + anomaly scoring + peer analysis (`ueba`) |
+| **SecOps — SOAR** | Playbooks → real active-response, dry-run-safe, run history (`soar`) |
+| **SecOps — Threat Intel** | IOC store + match on real telemetry + feed import (`threatintel`) |
+| **SecOps — NDR** | Beaconing/C2, port-scan & IOC-destination detection from flows (`ndr`) |
+| **SecOps — Cloud** | CSPM: evaluate cloud config vs CIS + import Prowler (`cloud`) |
+| **SecOps — AI** | **Local** Naive-Bayes + heuristic triage, kill-chain NLG, NL→query — no token (`ai`) |
 
 ## Architecture
 
@@ -66,7 +77,16 @@ The agent is **pure-Python (stdlib only)** — deploy it on any host with Python
         │  FIM · Log Monitoring · SCA · Syscollector · Web Audit · │
         │  Active Response · offline store-and-forward queue       │
         └──────────────────────────────────────────────────────────┘
+
+  nexus-secops — SOC analytics layer ON TOP of the manager's store (no new agent):
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │  siem · correlate(XDR) · edr · ueba · soar · threatintel · ndr · cloud ·  │
+  │  ai (local triage)        →  all read the same event/alert store          │
+  └──────────────────────────────────────────────────────────────────────────┘
 ```
+
+> One platform, one agent, modules inside — the Wazuh/Elastic/Defender/Cortex model.
+> Full hierarchy & data flow: [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
 ## Installation
 
@@ -86,7 +106,7 @@ Both install the umbrella command **`nexus`** plus five standalone commands: `ne
 `nexus-agent`, `nexus-cli`, `nexus-dashboard`, `nexus-license`. Requires **Python 3.8+** on the host.
 
 ```bash
-nexus --version       # prints: nexus 1.2.1   (verify the install on any terminal)
+nexus --version       # prints: nexus 2.0.0   (verify the install on any terminal)
 nexus --help          # list sub-commands
 ```
 
@@ -140,9 +160,12 @@ with `NEXUS_LICENSE=<token-or-file>` or `nexus cli apply-license`. Contact the v
 
 ## Documentation
 
+- Architecture & hierarchy — [`ARCHITECTURE.md`](./ARCHITECTURE.md)
 - Product brief & pricing — `docs/PRODUCT-BRIEF.md`
 - IP & licensing — `docs/IP-PROTECTION.md`
-- Validation: `python tests/test_fleet.py`, `pwsh validate.ps1`, `pwsh validate_agent.ps1`
+- Validation (Fleet + all 9 SecOps pillars):
+  `python tests/test_fleet.py` · `test_secops.py` · `test_soar.py` · `test_threatintel.py` ·
+  `test_ueba.py` · `test_ai.py` · `test_edr.py` · `test_cloud.py` · `test_ndr.py`
 
 ## Support
 
