@@ -68,6 +68,17 @@ def main(argv=None):
     inc.add_argument("--status", default="open")
     au = sub.add_parser("add-user", help="buat token RBAC (admin|viewer)")
     au.add_argument("--role", default="viewer", choices=["admin", "viewer"])
+    # --- SecOps (Pro) — lapisan analitik SOC ---
+    se = sub.add_parser("search", help="SIEM: cari event/alert (NQL)")
+    se.add_argument("--index", default="events", choices=["events", "alerts"])
+    se.add_argument("--q", default=""); se.add_argument("--limit", type=int, default=200)
+    xd = sub.add_parser("xdr", help="XDR: insiden terkorelasi"); xd.add_argument("--status", default="")
+    sub.add_parser("ueba", help="UEBA: skor risiko entitas")
+    sub.add_parser("ti", help="Threat Intel: daftar IOC")
+    sub.add_parser("ndr", help="NDR: top talker jaringan")
+    sub.add_parser("cloud", help="Cloud CSPM: temuan misconfig")
+    sub.add_parser("triage", help="AI: hasil triase insiden")
+    sub.add_parser("soar", help="SOAR: daftar playbook")
     args = p.parse_args(argv)
 
     # Konfigurasi TLS untuk transport admin (Fix: TLS untuk CLI/dashboard).
@@ -120,6 +131,23 @@ def main(argv=None):
             out = admin.incidents(args.host, args.port, args.token, args.status)
         elif args.action == "add-user":
             out = admin.add_user(args.host, args.port, args.token, args.role)
+        # --- SecOps (Pro) — manager membalas 403 bila lisensi bukan Pro/Enterprise ---
+        elif args.action == "search":
+            out = admin.search(args.host, args.port, args.token, args.index, args.q, args.limit)
+        elif args.action == "xdr":
+            out = admin.xdr(args.host, args.port, args.token, args.status)
+        elif args.action == "ueba":
+            out = admin.ueba(args.host, args.port, args.token)
+        elif args.action == "ti":
+            out = admin.ti(args.host, args.port, args.token)
+        elif args.action == "ndr":
+            out = admin.ndr(args.host, args.port, args.token)
+        elif args.action == "cloud":
+            out = admin.cloud(args.host, args.port, args.token)
+        elif args.action == "triage":
+            out = admin.triage(args.host, args.port, args.token)
+        elif args.action == "soar":
+            out = admin.soar(args.host, args.port, args.token)
         else:
             raise SystemExit(f"aksi tidak dikenal: {args.action}")
     except fc.HttpError as e:
