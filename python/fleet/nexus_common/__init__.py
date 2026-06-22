@@ -8,4 +8,4 @@
 
 # Sumber tunggal versi paket (selaras dengan pyproject.toml). Semua CLI memakai
 # nilai ini untuk `--version` agar tak pernah ada selisih versi.
-__version__ = "2.1.0"
+__version__ = "2.2.1"

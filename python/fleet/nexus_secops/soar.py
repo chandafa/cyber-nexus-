@@ -43,13 +43,7 @@ DESTRUCTIVE = {"block_ip", "kill_process", "disable_guest"}   # default dry_run
 
 # --------------------------------------------------------------------------- DB
 def _conn():
-    c = sqlite3.connect(fc.manager_db_path(), timeout=10)
-    c.row_factory = sqlite3.Row
-    try:
-        c.execute("PRAGMA busy_timeout=5000")
-    except Exception:
-        pass
-    return c
+    return fc.connect()
 
 
 def ensure_tables(c):
@@ -432,7 +426,13 @@ def run_now(playbook_id, ref_id, tenant="default"):
         return g
     pb = g["playbook"]
     on = pb.get("trigger", {}).get("on", "alert")
-    if on == "incident":
+    if not ref_id:
+        # Run manual ad-hoc TANPA ref (analis menekan 'Run' dari GUI/mobile/CLI tanpa
+        # memilih alert/insiden). Jalankan playbook sesuai mode-nya (dry_run = aman);
+        # aksi yang butuh ip/proses jadi no-op/gated, langkah notify tetap jalan.
+        ctx = {"agent_id": "", "ip": "", "process": "", "entity": "manual",
+               "trigger": "manual", "ref_id": "", "obj": {}}
+    elif on == "incident":
         from nexus_secops import correlate as xdr
         r = xdr.get_incident(ref_id, tenant)
         if not r.get("ok"):
@@ -445,7 +445,7 @@ def run_now(playbook_id, ref_id, tenant="default"):
             return {"ok": False, "error": "alert tak ditemukan"}
         ctx = _context_from_alert(al)
     rec = _run_playbook(pb, ctx, tenant)
-    return {"ok": True, "run": rec}
+    return {"ok": True, "run": rec, "manual": not ref_id}
 
 
 def _one_alert(alert_id):

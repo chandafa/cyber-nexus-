@@ -37,18 +37,17 @@ import time
 
 from nexus_common import protocol as fc
 
+# Persona AI lokal Nexus. Diberi nama agar mudah dikenali/dipasarkan ("tanya AI-nya"),
+# bukan sekadar "fitur AI". Tetap 100% lokal — tanpa API/token.
+ASSISTANT_NAME = "Ask Nexus"
+ASSISTANT_TAGLINE = "asisten keamanan lokal Nexus — tanpa token, data tak keluar jaringan"
+
 _MODEL = None            # cache model NB per-proses (dimuat dari DB / hasil train)
 
 
 # --------------------------------------------------------------------------- DB
 def _conn():
-    c = sqlite3.connect(fc.manager_db_path(), timeout=10)
-    c.row_factory = sqlite3.Row
-    try:
-        c.execute("PRAGMA busy_timeout=5000")
-    except Exception:
-        pass
-    return c
+    return fc.connect()
 
 
 def ensure_tables(c):
@@ -411,10 +410,11 @@ def nl_query(text):
         words = [w for w in re.findall(r"[a-z0-9_.:-]{3,}", t)
                  if w not in ("cari", "tampilkan", "show", "find", "semua", "all", "dari", "the")]
         nql = " ".join(words[:6])
-        return {"ok": True, "module": "nexus_secops", "index": index, "nql": nql,
-                "matched": [], "note": "tak ada intent dikenal — memakai pencarian teks bebas"}
-    return {"ok": True, "module": "nexus_secops", "index": index, "nql": " ".join(parts),
-            "matched": matched}
+        return {"ok": True, "module": "nexus_secops", "assistant": ASSISTANT_NAME,
+                "index": index, "nql": nql, "matched": [],
+                "note": "tak ada intent dikenal — memakai pencarian teks bebas"}
+    return {"ok": True, "module": "nexus_secops", "assistant": ASSISTANT_NAME,
+            "index": index, "nql": " ".join(parts), "matched": matched}
 
 
 # --------------------------------------------------------------------------- lifecycle

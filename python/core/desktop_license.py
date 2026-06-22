@@ -110,6 +110,21 @@ PRO_COMMANDS = {
     "edr_hosts": "*", "edr_tree": "*", "edr_processes": "*", "edr_ancestry": "*",
     "cloud_scan": "*", "cloud_findings": "*", "cloud_posture": "*", "cloud_stats": "*",
     "ndr_flows": "*", "ndr_talkers": "*", "ndr_stats": "*",
+    # --- fitur ekosistem baru (W1-W4) — fitur premium = Pro ---
+    "fleet_canary_mint": "*", "fleet_canary_list": "*", "fleet_canary_del": "*",
+    "fleet_canary_stats": "*",
+    "fleet_aware_templates": "*", "fleet_aware_campaigns": "*", "fleet_aware_score": "*",
+    "fleet_aware_new": "*", "fleet_aware_send": "*", "fleet_aware_del": "*",
+    "fleet_atlas_graph": "*", "fleet_atlas_blast": "*", "fleet_atlas_exposed": "*",
+    "fleet_atlas_stats": "*",
+    "fleet_comply_frameworks": "*", "fleet_comply_report": "*",
+    "fleet_pack_export": "*", "fleet_pack_import": "*", "fleet_pack_install": "*",
+    "fleet_replay": "*", "fleet_syslog_ingest": "*",
+    "fleet_ti_export": "*", "fleet_ti_import_bundle": "*",
+    "fleet_notify_add": "*", "fleet_notify_del": "*", "fleet_notify_test": "*",
+    "fleet_airgap_set": "*",
+    # read-status dasar tetap free: fleet_audit_verify, fleet_airgap_status,
+    # fleet_notify_list, fleet_pack_catalog
 }
 
 # Label fitur (untuk pesan & UI).

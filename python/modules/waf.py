@@ -955,40 +955,40 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
                 self.send_header('Content-Type', 'text/html; charset=utf-8')
                 self.end_headers()
                 err_body = """<!DOCTYPE html>
-<html>
-<head>
-    <title>Critical Security Error — Cyber Nexus WAF</title>
-    <style>
-        body {
-            background-color: #09090b;
-            color: #f87171;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-            text-align: center;
-        }
-        .card {
-            background: rgba(239, 68, 68, 0.05);
-            border: 1px solid rgba(239, 68, 68, 0.2);
-            border-radius: 12px;
-            padding: 40px;
-            max-width: 450px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-        }
-        h1 { font-size: 20px; font-weight: 700; margin: 0 0 10px 0; color: #f87171; }
-        p { font-size: 13.5px; color: #a1a1aa; line-height: 1.5; margin: 0; }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <h1>🔒 Security Lockdown</h1>
-        <p>A system error occurred in the security processing layer. To prevent bypass, the connection has been blocked. Please contact the administrator.</p>
-    </div>
-</body>
-</html>"""
+                            <html>
+                            <head>
+                                <title>Critical Security Error — Cyber Nexus WAF</title>
+                                <style>
+                                    body {
+                                        background-color: #09090b;
+                                        color: #f87171;
+                                        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                                        display: flex;
+                                        justify-content: center;
+                                        align-items: center;
+                                        min-height: 100vh;
+                                        margin: 0;
+                                        text-align: center;
+                                    }
+                                    .card {
+                                        background: rgba(239, 68, 68, 0.05);
+                                        border: 1px solid rgba(239, 68, 68, 0.2);
+                                        border-radius: 12px;
+                                        padding: 40px;
+                                        max-width: 450px;
+                                        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+                                    }
+                                    h1 { font-size: 20px; font-weight: 700; margin: 0 0 10px 0; color: #f87171; }
+                                    p { font-size: 13.5px; color: #a1a1aa; line-height: 1.5; margin: 0; }
+                                </style>
+                            </head>
+                            <body>
+                                <div class="card">
+                                    <h1>🔒 Security Lockdown</h1>
+                                    <p>A system error occurred in the security processing layer. To prevent bypass, the connection has been blocked. Please contact the administrator.</p>
+                                </div>
+                            </body>
+                            </html>"""
                 self.wfile.write(err_body.encode('utf-8'))
             except Exception:
                 pass
@@ -1019,7 +1019,6 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
         max_rps = config['max_rps']
         learning_mode = config['learning_mode']
         allowlist_ips = config['allowlist_ips']
-        allowlist_paths = config['allowlist_paths']
         enabled_rules_list = config['rules']
 
         # 1. Handle CAPTCHA Verification Endpoint

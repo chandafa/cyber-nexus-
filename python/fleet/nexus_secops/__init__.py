@@ -37,7 +37,10 @@ tanpa menduplikasi data:
 Stdlib-only — konsisten dengan komponen Fleet lain.
 """
 
-__version__ = "2.0.0"
+try:
+    from nexus_common import __version__  # noqa: F401 — sumber tunggal versi
+except Exception:  # pragma: no cover — dijalankan lepas dari paket
+    __version__ = "2.2.1"
 
 from nexus_secops import siem          # noqa: E402,F401
 from nexus_secops import correlate     # noqa: E402,F401
@@ -48,6 +51,13 @@ from nexus_secops import ai            # noqa: E402,F401
 from nexus_secops import edr           # noqa: E402,F401
 from nexus_secops import cloud         # noqa: E402,F401
 from nexus_secops import ndr           # noqa: E402,F401
+# Fitur ekosistem (W1-W4)
+from nexus_secops import canary        # noqa: E402,F401
+from nexus_secops import aware         # noqa: E402,F401
+from nexus_secops import atlas         # noqa: E402,F401
+from nexus_secops import comply        # noqa: E402,F401
+from nexus_secops import packs         # noqa: E402,F401
+from nexus_secops import edge          # noqa: E402,F401
 
 __all__ = ["siem", "correlate", "soar", "threatintel", "ueba", "ai", "edr", "cloud",
-           "ndr", "__version__"]
+           "ndr", "canary", "aware", "atlas", "comply", "packs", "edge", "__version__"]

@@ -22,13 +22,55 @@ NYATA, bukan demo:
 
 Tabel: ti_iocs (indikator), ti_matches (audit kecocokan).
 """
+import ipaddress
 import json
+import os
 import re
+import socket
 import sqlite3
 import urllib.request
 import uuid
+from urllib.parse import urlparse
 
 from nexus_common import protocol as fc
+
+
+# --------------------------------------------------------------------------- anti-SSRF
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Tolak redirect — cegah SSRF lewat 302 ke target internal/file://."""
+    def redirect_request(self, *a, **k):
+        return None
+
+
+def _assert_url_allowed(url: str, allow_local: bool = False):
+    """Default: izinkan hanya http/https ke host PUBLIK — tolak file://, loopback,
+    RFC1918, link-local (mis. metadata cloud 169.254.169.254), reserved/multicast.
+    Ini menutup SSRF: pemegang admin-token hanya mengontrol field URL, bukan env.
+
+    allow_local=True (operator set env NEXUS_TI_ALLOW_LOCAL=1) mengizinkan file://
+    & host internal — untuk impor feed lokal di lingkungan air-gapped. Tidak bisa
+    diaktifkan lewat API, jadi bukan jalur SSRF."""
+    p = urlparse(url)
+    if p.scheme == "file":
+        if allow_local:
+            return
+        raise ValueError("file:// hanya untuk impor lokal (set NEXUS_TI_ALLOW_LOCAL=1)")
+    if p.scheme not in ("http", "https"):
+        raise ValueError(f"skema URL tidak diizinkan: {p.scheme or '(kosong)'}")
+    if not p.hostname:
+        raise ValueError("URL tanpa host")
+    if allow_local:
+        return
+    port = p.port or (443 if p.scheme == "https" else 80)
+    try:
+        infos = socket.getaddrinfo(p.hostname, port)
+    except Exception as e:
+        raise ValueError(f"resolusi host gagal: {e}")
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+                or ip.is_multicast or ip.is_unspecified):
+            raise ValueError(f"alamat internal/terlarang ditolak: {ip}")
 
 # --------------------------------------------------------------------------- pola observable
 _IPV4 = re.compile(r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b")
@@ -46,13 +88,7 @@ _PRIVATE = re.compile(r"^(?:10\.|127\.|0\.|169\.254\.|192\.168\.|172\.(?:1[6-9]|
 
 # --------------------------------------------------------------------------- DB
 def _conn():
-    c = sqlite3.connect(fc.manager_db_path(), timeout=10)
-    c.row_factory = sqlite3.Row
-    try:
-        c.execute("PRAGMA busy_timeout=5000")
-    except Exception:
-        pass
-    return c
+    return fc.connect()
 
 
 def ensure_tables(c):
@@ -166,8 +202,11 @@ def import_feed(url, fmt="text", source=None, threat="feed", severity="high",
     init_db()
     source = source or url
     try:
+        allow_local = os.environ.get("NEXUS_TI_ALLOW_LOCAL") == "1"
+        _assert_url_allowed(url, allow_local)                  # anti-SSRF (scheme + IP allowlist)
+        opener = urllib.request.build_opener(_NoRedirect)      # tolak redirect → internal/file
         req = urllib.request.Request(url, headers={"User-Agent": "Nexus-TI/1.0"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:   # noqa: S310 (URL operator-supplied)
+        with opener.open(req, timeout=timeout) as resp:        # noqa: S310 (URL divalidasi)
             raw = resp.read().decode("utf-8", "replace")
     except Exception as e:
         return {"ok": False, "error": f"gagal unduh feed: {e}", "url": url}

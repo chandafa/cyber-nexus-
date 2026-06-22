@@ -13,6 +13,10 @@ import { buildArgs, runToolJson } from "../lib/tauri";
 import { useScanRuntimeStore } from "../app/store/scanRuntime.store";
 import { useToastStore } from "../app/store/toast.store";
 
+type TabKey =
+  | "agents" | "alerts" | "events" | "policy"
+  | "rules" | "sigma" | "audit" | "vulndb" | "notify" | "users";
+
 const SEV_CLS: Record<string, string> = {
   critical: "bg-red-950/30 text-red-300",
   high: "bg-orange-950/30 text-orange-300",
@@ -36,7 +40,30 @@ export const FleetManager: React.FC = () => {
   const [events, setEvents] = useState<any[]>([]);
   const [alerts, setAlerts] = useState<any[]>([]);
   const [policy, setPolicy] = useState<string>("");
-  const [tab, setTab] = useState<"agents" | "alerts" | "events" | "policy">("alerts");
+  const [tab, setTab] = useState<TabKey>("alerts");
+
+  // --- Admin panels (Rules / Sigma / Audit / VulnDB / Notify / Users) ---
+  const [rules, setRules] = useState<string>("");
+  const [rulesLoaded, setRulesLoaded] = useState(false);
+  const [rulesBusy, setRulesBusy] = useState(false);
+
+  const [sigma, setSigma] = useState<string>("");
+  const [sigmaBusy, setSigmaBusy] = useState(false);
+
+  const [audit, setAudit] = useState<any[]>([]);
+  const [auditBusy, setAuditBusy] = useState(false);
+
+  const [vulnDb, setVulnDb] = useState<string>("");
+  const [vulnLoaded, setVulnLoaded] = useState(false);
+  const [vulnBusy, setVulnBusy] = useState(false);
+
+  const [webhook, setWebhook] = useState<string>("");
+  const [minLevel, setMinLevel] = useState<string>("12");
+  const [notifyBusy, setNotifyBusy] = useState(false);
+
+  const [users, setUsers] = useState<any[]>([]);
+  const [newToken, setNewToken] = useState<{ token: string; role: string } | null>(null);
+  const [userBusy, setUserBusy] = useState(false);
 
   const start = () => {
     consoleRef.current?.start({
@@ -76,6 +103,153 @@ export const FleetManager: React.FC = () => {
     const r = await runToolJson("fleet_policy_set", ["--policy", policy]);
     if (r.ok) toast(`Policy disimpan -> versi ${r.policy_version}. Agent menariknya pada heartbeat berikutnya.`, { kind: "success" });
     else toast(r.error || "Gagal menyimpan policy.", { kind: "error" });
+  };
+
+  // -------------------------------------------------- Detection Rules
+  const loadRules = async () => {
+    setRulesBusy(true);
+    try {
+      const r = await runToolJson("fleet_rules_get");
+      setRules(JSON.stringify(r.rules || [], null, 2));
+      setRulesLoaded(true);
+    } catch (err) {
+      toast("Gagal memuat ruleset.", { kind: "error" });
+      console.error(err);
+    } finally {
+      setRulesBusy(false);
+    }
+  };
+  const saveRules = async () => {
+    let parsed: any;
+    try {
+      parsed = JSON.parse(rules);
+      if (!Array.isArray(parsed)) throw new Error("bukan array");
+    } catch {
+      toast("Rules harus berupa JSON array yang valid.", { kind: "error" });
+      return;
+    }
+    setRulesBusy(true);
+    try {
+      const r = await runToolJson("fleet_rules_set", buildArgs({ rules: JSON.stringify(parsed) }));
+      if (r.ok === false) toast(r.error || "Gagal menyimpan rules.", { kind: "error" });
+      else toast(`Ruleset disimpan (${r.count ?? parsed.length} rule).`, { kind: "success" });
+    } finally {
+      setRulesBusy(false);
+    }
+  };
+
+  // -------------------------------------------------- Sigma import
+  const importSigma = async () => {
+    let parsed: any;
+    try {
+      parsed = JSON.parse(sigma);
+    } catch {
+      toast("Sigma harus berupa JSON yang valid.", { kind: "error" });
+      return;
+    }
+    setSigmaBusy(true);
+    try {
+      const r = await runToolJson("fleet_sigma_import", buildArgs({ sigma: JSON.stringify(parsed) }));
+      if (r.ok === false) toast(r.error || "Gagal mengimpor Sigma.", { kind: "error" });
+      else {
+        toast(`Sigma diimpor (${r.imported ?? r.count ?? "?"} rule).`, { kind: "success" });
+        setSigma("");
+        if (rulesLoaded) loadRules();
+      }
+    } finally {
+      setSigmaBusy(false);
+    }
+  };
+
+  // -------------------------------------------------- Audit log
+  const loadAudit = async () => {
+    setAuditBusy(true);
+    try {
+      const r = await runToolJson("fleet_audit", buildArgs({ limit: 200 }));
+      setAudit(r.audit || r.entries || r.log || []);
+    } catch (err) {
+      toast("Gagal memuat audit log.", { kind: "error" });
+      console.error(err);
+    } finally {
+      setAuditBusy(false);
+    }
+  };
+
+  // -------------------------------------------------- Vulnerability DB
+  const loadVulnDb = async () => {
+    setVulnBusy(true);
+    try {
+      const r = await runToolJson("fleet_vulndb_get");
+      setVulnDb(JSON.stringify(r.vuln_db || [], null, 2));
+      setVulnLoaded(true);
+    } catch (err) {
+      toast("Gagal memuat vulnerability DB.", { kind: "error" });
+      console.error(err);
+    } finally {
+      setVulnBusy(false);
+    }
+  };
+  const saveVulnDb = async () => {
+    let parsed: any;
+    try {
+      parsed = JSON.parse(vulnDb);
+      if (!Array.isArray(parsed)) throw new Error("bukan array");
+    } catch {
+      toast("Vuln DB harus berupa JSON array yang valid.", { kind: "error" });
+      return;
+    }
+    setVulnBusy(true);
+    try {
+      const r = await runToolJson("fleet_vulndb_set", buildArgs({ vuln_db: JSON.stringify(parsed) }));
+      if (r.ok === false) toast(r.error || "Gagal menyimpan vuln DB.", { kind: "error" });
+      else toast(`Vulnerability DB disimpan (${r.count ?? parsed.length} entri).`, { kind: "success" });
+    } finally {
+      setVulnBusy(false);
+    }
+  };
+
+  // -------------------------------------------------- Webhook / Notify
+  const saveNotify = async () => {
+    setNotifyBusy(true);
+    try {
+      const lvl = parseInt(minLevel, 10);
+      const r = await runToolJson("fleet_notify", buildArgs({
+        webhook,
+        min_level: Number.isNaN(lvl) ? 12 : lvl,
+      }));
+      if (r.ok === false) toast(r.error || "Gagal menyimpan webhook.", { kind: "error" });
+      else toast("Konfigurasi notifikasi disimpan.", { kind: "success" });
+    } finally {
+      setNotifyBusy(false);
+    }
+  };
+
+  // -------------------------------------------------- Users / RBAC
+  const loadUsers = async () => {
+    setUserBusy(true);
+    try {
+      const r = await runToolJson("fleet_users_list");
+      setUsers(r.users || []);
+    } catch (err) {
+      // backend mungkin belum tersedia — tampilkan kosong, jangan crash
+      console.error(err);
+    } finally {
+      setUserBusy(false);
+    }
+  };
+  const addUser = async (role: "admin" | "viewer") => {
+    setUserBusy(true);
+    try {
+      const r = await runToolJson("fleet_add_user", buildArgs({ role }));
+      if (r.ok === false) toast(r.error || "Gagal membuat token.", { kind: "error" });
+      else {
+        setNewToken({ token: r.token, role: r.role || role });
+        toast(`Token ${r.role || role} dibuat — salin sekarang.`, { kind: "success" });
+        loadUsers();
+      }
+    } finally {
+      setUserBusy(false);
+    }
   };
 
   const sendCommand = async (agentId: string, cmd: string) => {
@@ -133,6 +307,15 @@ export const FleetManager: React.FC = () => {
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [port]);
+
+  // Muat data panel admin sekali saat tab-nya pertama dibuka.
+  useEffect(() => {
+    if (tab === "rules" && !rulesLoaded && !rulesBusy) loadRules();
+    if (tab === "audit" && audit.length === 0 && !auditBusy) loadAudit();
+    if (tab === "vulndb" && !vulnLoaded && !vulnBusy) loadVulnDb();
+    if (tab === "users" && users.length === 0 && !userBusy && !newToken) loadUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
 
   const online = agents.filter((a) => a.status === "online").length;
 
@@ -268,13 +451,15 @@ export const FleetManager: React.FC = () => {
       />
 
       <div className="border-t border-nexus-hairline bg-nexus-surface">
-        <div className="flex gap-1 px-4 pt-2 border-b border-nexus-hairline">
-          {(["agents", "alerts", "events", "policy"] as const).map((t) => (
+        <div className="flex gap-1 px-4 pt-2 border-b border-nexus-hairline overflow-x-auto">
+          {(["agents", "alerts", "events", "policy", "rules", "sigma", "audit", "vulndb", "notify", "users"] as const).map((t) => (
             <button key={t} onClick={() => setTab(t)}
-              className={`px-4 py-2 text-xs font-semibold capitalize transition-colors border-b-2 ${
+              className={`px-3 py-2 text-xs font-semibold capitalize whitespace-nowrap transition-colors border-b-2 ${
                 tab === t ? "border-nexus-accent text-nexus-text" : "border-transparent text-nexus-muted hover:text-nexus-text"}`}>
               {t === "agents" ? `Agents (${agents.length})` : t === "alerts" ? `Alerts (${alerts.length})`
-                : t === "events" ? `Events (${events.length})` : "Policy"}
+                : t === "events" ? `Events (${events.length})` : t === "policy" ? "Policy"
+                : t === "rules" ? "Rules" : t === "sigma" ? "Sigma" : t === "audit" ? "Audit"
+                : t === "vulndb" ? "VulnDB" : t === "notify" ? "Notify" : "Users"}
             </button>
           ))}
           <button className="ml-auto nx-btn-ghost text-xs my-1" onClick={refresh}>
@@ -382,6 +567,184 @@ export const FleetManager: React.FC = () => {
               <button className="nx-btn-primary px-4 py-1.5 text-xs" onClick={savePolicy}>
                 <Ic.save className="h-3.5 w-3.5 mr-1.5" /> Simpan & Distribusikan Policy
               </button>
+            </div>
+          )}
+
+          {tab === "rules" && (
+            <div className="space-y-2">
+              <p className="text-[11px] text-nexus-muted">
+                Detection ruleset (JSON array). Rule engine mengevaluasi event agent terhadap rules ini untuk
+                menghasilkan alert. Edit langsung lalu Simpan.
+              </p>
+              <textarea
+                className="nx-input font-mono text-[11px] w-full h-44 resize-none"
+                value={rules}
+                onChange={(e) => setRules(e.target.value)}
+                spellCheck={false}
+                placeholder={rulesBusy ? "Memuat ruleset…" : "[]"}
+              />
+              <div className="flex gap-2">
+                <button className="nx-btn-primary px-4 py-1.5 text-xs" onClick={saveRules} disabled={rulesBusy}>
+                  <Ic.save className="h-3.5 w-3.5 mr-1.5" /> Simpan Ruleset
+                </button>
+                <button className="nx-btn-ghost px-3 py-1.5 text-xs" onClick={loadRules} disabled={rulesBusy}>
+                  <Ic.refresh className="h-3.5 w-3.5 mr-1" /> Muat ulang
+                </button>
+              </div>
+            </div>
+          )}
+
+          {tab === "sigma" && (
+            <div className="space-y-2">
+              <p className="text-[11px] text-nexus-muted">
+                Tempel rule <b>Sigma</b> dalam format JSON, lalu impor untuk dikonversi & ditambahkan ke ruleset
+                deteksi manager.
+              </p>
+              <textarea
+                className="nx-input font-mono text-[11px] w-full h-44 resize-none"
+                value={sigma}
+                onChange={(e) => setSigma(e.target.value)}
+                spellCheck={false}
+                placeholder='{"title": "...", "detection": { ... }}'
+              />
+              <button className="nx-btn-primary px-4 py-1.5 text-xs" onClick={importSigma} disabled={sigmaBusy || !sigma.trim()}>
+                <Ic.download className="h-3.5 w-3.5 mr-1.5" /> Impor Sigma
+              </button>
+            </div>
+          )}
+
+          {tab === "audit" && (
+            <div className="space-y-2">
+              {auditBusy && audit.length === 0 ? (
+                <Empty text="Memuat audit log…" />
+              ) : audit.length === 0 ? (
+                <Empty text="Belum ada entri audit." />
+              ) : (
+                <table className="w-full text-xs">
+                  <thead className="text-left text-nexus-muted">
+                    <tr><Th>Waktu</Th><Th>Aktor</Th><Th>Aksi</Th><Th>Detail</Th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-nexus-hairline text-nexus-text">
+                    {audit.map((e, i) => (
+                      <tr key={e.id ?? i} className="hover:bg-nexus-panel/40">
+                        <td className="px-2 py-1.5 font-mono text-[11px] whitespace-nowrap">{e.ts_iso || e.ts || "—"}</td>
+                        <td className="px-2 py-1.5 font-mono text-[11px]">{e.actor || "—"}</td>
+                        <td className="px-2 py-1.5 font-mono text-[11px] text-nexus-accent">{e.action || e.event || "—"}</td>
+                        <td className="px-2 py-1.5 text-[11px] text-nexus-subtle truncate max-w-[360px]">
+                          {typeof e.detail === "string" ? e.detail : e.detail != null ? JSON.stringify(e.detail) : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+
+          {tab === "vulndb" && (
+            <div className="space-y-2">
+              <p className="text-[11px] text-nexus-muted">
+                Database kerentanan (JSON array) yang dipakai untuk mencocokkan paket/software pada telemetri agent.
+                Edit lalu Simpan untuk memperbarui.
+              </p>
+              <textarea
+                className="nx-input font-mono text-[11px] w-full h-44 resize-none"
+                value={vulnDb}
+                onChange={(e) => setVulnDb(e.target.value)}
+                spellCheck={false}
+                placeholder={vulnBusy ? "Memuat vuln DB…" : "[]"}
+              />
+              <div className="flex gap-2">
+                <button className="nx-btn-primary px-4 py-1.5 text-xs" onClick={saveVulnDb} disabled={vulnBusy}>
+                  <Ic.save className="h-3.5 w-3.5 mr-1.5" /> Simpan Vuln DB
+                </button>
+                <button className="nx-btn-ghost px-3 py-1.5 text-xs" onClick={loadVulnDb} disabled={vulnBusy}>
+                  <Ic.refresh className="h-3.5 w-3.5 mr-1" /> Muat ulang
+                </button>
+              </div>
+            </div>
+          )}
+
+          {tab === "notify" && (
+            <div className="space-y-3 max-w-md">
+              <p className="text-[11px] text-nexus-muted">
+                Kirim alert ke webhook eksternal (Slack/Discord/HTTP) bila level alert mencapai ambang minimum.
+              </p>
+              <div>
+                <label className="nx-label">Webhook URL</label>
+                <input
+                  className="nx-input font-mono text-[11px]"
+                  value={webhook}
+                  onChange={(e) => setWebhook(e.target.value)}
+                  placeholder="https://hooks.slack.com/services/..."
+                />
+              </div>
+              <div>
+                <label className="nx-label">Min Level</label>
+                <input
+                  type="number"
+                  className="nx-input font-mono text-[11px] w-32"
+                  value={minLevel}
+                  onChange={(e) => setMinLevel(e.target.value)}
+                />
+                <p className="text-[10.5px] text-nexus-subtle mt-1">Hanya alert dengan level ≥ nilai ini yang dikirim (default 12).</p>
+              </div>
+              <button className="nx-btn-primary px-4 py-1.5 text-xs" onClick={saveNotify} disabled={notifyBusy}>
+                <Ic.save className="h-3.5 w-3.5 mr-1.5" /> Simpan Notifikasi
+              </button>
+            </div>
+          )}
+
+          {tab === "users" && (
+            <div className="space-y-3">
+              <p className="text-[11px] text-nexus-muted">
+                Buat API token untuk akses manager. Token <b>hanya ditampilkan sekali</b> — salin & simpan dengan aman.
+              </p>
+              <div className="flex gap-2">
+                <button className="nx-btn-primary px-4 py-1.5 text-xs" onClick={() => addUser("admin")} disabled={userBusy}>
+                  <Ic.check className="h-3.5 w-3.5 mr-1" /> Buat token admin
+                </button>
+                <button className="nx-btn-ghost px-4 py-1.5 text-xs" onClick={() => addUser("viewer")} disabled={userBusy}>
+                  <Ic.check className="h-3.5 w-3.5 mr-1" /> Buat token viewer
+                </button>
+                <button className="nx-btn-ghost px-3 py-1.5 text-xs ml-auto" onClick={loadUsers} disabled={userBusy}>
+                  <Ic.refresh className="h-3.5 w-3.5 mr-1" /> Muat ulang
+                </button>
+              </div>
+
+              {newToken && (
+                <div className="border border-nexus-accent/50 rounded p-3 bg-nexus-panel/50 space-y-2">
+                  <div className="text-[10px] uppercase tracking-wide text-nexus-subtle">
+                    Token baru ({newToken.role}) — salin sekarang
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <code className="flex-1 truncate text-[11px] text-nexus-text bg-nexus-surface px-2 py-1 border border-nexus-hairline rounded">
+                      {newToken.token}
+                    </code>
+                    <button className="text-nexus-muted hover:text-nexus-accent" title="Salin" onClick={() => copy(newToken.token, "Token")}>
+                      <Ic.copy className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {users.length === 0 ? (
+                <Empty text={userBusy ? "Memuat pengguna…" : "Belum ada token pengguna tambahan."} />
+              ) : (
+                <table className="w-full text-xs">
+                  <thead className="text-left text-nexus-muted">
+                    <tr><Th>Token</Th><Th>Role</Th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-nexus-hairline font-mono text-nexus-text">
+                    {users.map((u, i) => (
+                      <tr key={(u.token_prefix || u.token || i) + ""} className="hover:bg-nexus-panel/40">
+                        <td className="px-2 py-1.5 text-[11px]">{u.token_prefix || u.token || "—"}</td>
+                        <td className="px-2 py-1.5 text-[11px]">{u.role || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           )}
         </div>

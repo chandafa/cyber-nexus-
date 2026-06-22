@@ -21,7 +21,9 @@ import hmac
 import json
 import os
 import platform
+import secrets
 import socket
+import sqlite3
 import ssl
 import time
 import uuid
@@ -54,6 +56,18 @@ def manager_db_path() -> str:
     return os.environ.get("NEXUS_FLEET_DB") or os.path.join(_data_dir(), "fleet_manager.db")
 
 
+def connect(timeout: int = 10):
+    """Koneksi SQLite standar ke DB manager (Row factory + busy_timeout).
+    Satu sumber kebenaran — modul SecOps memakai ini, bukan menyalin sendiri."""
+    c = sqlite3.connect(manager_db_path(), timeout=timeout)
+    c.row_factory = sqlite3.Row
+    try:
+        c.execute("PRAGMA busy_timeout=5000")
+    except Exception:
+        pass
+    return c
+
+
 def agent_state_path() -> str:
     return os.environ.get("NEXUS_AGENT_DB") or os.path.join(_data_dir(), "fleet_agent.db")
 
@@ -72,7 +86,9 @@ def new_id(prefix: str) -> str:
 
 
 def gen_key() -> str:
-    return uuid.uuid4().hex + uuid.uuid4().hex
+    # Token autentikasi (admin/enroll/agent/user). CSPRNG, bukan uuid4 — uuid4
+    # tidak dijamin kriptografis & bit versi/variannya tetap (entropi berkurang).
+    return secrets.token_hex(32)
 
 
 def host_fingerprint() -> dict:
@@ -108,6 +124,15 @@ def sign(key: str, raw: bytes) -> str:
 def verify(key: str, raw: bytes, sig: str) -> bool:
     try:
         return hmac.compare_digest(sign(key, raw), sig or "")
+    except Exception:
+        return False
+
+
+def const_eq(a: str, b: str) -> bool:
+    """Perbandingan string waktu-konstan (anti timing side-channel) untuk
+    token/secret. Pakai ini, bukan ==, saat membandingkan admin/API token."""
+    try:
+        return hmac.compare_digest((a or "").encode("utf-8"), (b or "").encode("utf-8"))
     except Exception:
         return False
 
