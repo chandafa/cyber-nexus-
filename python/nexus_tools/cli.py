@@ -33,7 +33,7 @@ _PY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PY_ROOT not in sys.path:
     sys.path.insert(0, _PY_ROOT)
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 
 # --------------------------------------------------------------------------- registry
 # Tiap entri: (subperintah, command-dispatch, help, [argumen]).

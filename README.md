@@ -141,7 +141,7 @@ Pro/Enterprise token unlocks both the desktop app and the CLI on the **same devi
 
 ```bash
 pip install nexus-fleet          # or: npm install -g nexus-fleet
-nexus --version                  # verify install (prints: nexus 2.1.0)
+nexus --version                  # verify install (prints: nexus 2.2.0)
 
 nexus manager run --host 0.0.0.0 --port 8765   # server + dashboard at :8765/
 nexus manager info                              # show enrollment key & admin token

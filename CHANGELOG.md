@@ -3,6 +3,22 @@
 All notable changes to **Nexus Fleet** (`nexus-fleet`) are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.2.0] — 2026-06
+### Added
+- **Ecosystem expansion** — Notification Hub (Telegram/Email/Slack/Discord/Webhook/WhatsApp),
+  tamper-evident hash-chained audit log, shift-left SBOM scanner + CI gate, Nexus Canary
+  honeytokens, "Ask Nexus" local AI persona, time-travel incident replay, air-gapped mode +
+  offline threat-intel bundle, Nexus Aware (phishing-sim, Indonesian templates), Nexus Atlas
+  (attack-path graph + blast radius), Nexus Hub (content packs), Nexus Edge (agentless syslog
+  ingestion), and Nexus Comply (UU PDP + ISO 27001 coverage scoring).
+- **Desktop & CLI parity** — every new feature is reachable from the GUI (new "Ekosistem" group),
+  the `nexus-cli` console, and the desktop runner; all Pro-gated except the read-only audit view.
+- **Nexus Mobile** — Expo/React Native companion app (separate repo).
+### Fixed (security & correctness hardening)
+- Heartbeat command-delivery race, SSRF in threat-intel feed import, non-constant-time admin-token
+  comparison, agent TLS fail-open (now TOFU/fail-closed), CSPRNG auth tokens, a WAF request-handler
+  NameError, and eBPF status honesty (no false "Live" label). +10 test suites (20/20 green).
+
 ## [2.1.0] — 2026-06
 ### Added
 - **SecOps in the desktop GUI & CLI** — the nine SecOps pillars (SIEM, XDR correlation, EDR,

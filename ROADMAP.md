@@ -1,6 +1,6 @@
 # Nexus — Brand System & Roadmap
 
-> Status: living document · Versi produk saat ini: **2.1.0** · Disusun 2026-06-22
+> Status: living document · Versi produk saat ini: **2.2.0** · Disusun 2026-06-22
 
 ---
 

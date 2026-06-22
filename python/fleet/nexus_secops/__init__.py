@@ -40,7 +40,7 @@ Stdlib-only — konsisten dengan komponen Fleet lain.
 try:
     from nexus_common import __version__  # noqa: F401 — sumber tunggal versi
 except Exception:  # pragma: no cover — dijalankan lepas dari paket
-    __version__ = "2.1.0"
+    __version__ = "2.2.0"
 
 from nexus_secops import siem          # noqa: E402,F401
 from nexus_secops import correlate     # noqa: E402,F401
