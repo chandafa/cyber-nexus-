@@ -3,6 +3,20 @@
 All notable changes to **Nexus Fleet** (`nexus-fleet`) are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.2.1] — 2026-06
+### Fixed
+- **Uniform Pro license gate** — the new ecosystem features and the 9 SecOps pillars are
+  now gated at the Manager API level (not just the desktop runner), so CLI, mobile, and
+  dashboard enforce Pro/Enterprise consistently. Public canary/aware trigger endpoints and
+  the basic audit-log list stay free.
+- **SOAR ad-hoc run** — running a playbook with no alert/incident reference now executes a
+  manual run (honoring the playbook's mode) instead of returning 400; fixes the mobile/CLI
+  "Run" action.
+### Changed
+- Internal cleanup (behavior-neutral): consolidated the duplicated SecOps DB-connect helpers
+  into `nexus_common.protocol.connect()`, added a `_tenant()` helper, and removed a redundant
+  secondary license gate.
+
 ## [2.2.0] — 2026-06
 ### Added
 - **Ecosystem expansion** — Notification Hub (Telegram/Email/Slack/Discord/Webhook/WhatsApp),
