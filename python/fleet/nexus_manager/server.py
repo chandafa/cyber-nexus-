@@ -266,6 +266,11 @@ def _get_cfg(key, default=None):
     return cryptobox.decrypt(val) if key in _SECRET_KEYS else val
 
 
+def _tenant():
+    """Tenant aktif manager (default 'default') — satu sumber, hindari ulang."""
+    return _get_cfg("tenant") or "default"
+
+
 def _set_cfg(key, value):
     stored = cryptobox.encrypt(str(value)) if key in _SECRET_KEYS else str(value)
     c = _conn()
@@ -501,7 +506,7 @@ def _ingest_events(agent_id, body) -> tuple:
     if not isinstance(evts, list):
         return 400, {"error": "events harus list"}
     accept_demo = (_get_cfg("accept_demo") or "0") == "1"
-    tenant = _get_cfg("tenant") or "default"
+    tenant = _tenant()
     ruleset = get_rules()
     # Gerbang lisensi: tanpa fitur 'advanced_rules' (FREE), hanya rule tier 'free'
     # yang aktif (rule premium spt FIM .env, web-audit, dll. butuh lisensi).
@@ -1180,7 +1185,7 @@ def threatintel_scan(lookback=604800) -> dict:
     buat alert utk kecocokan BARU (berguna setelah menambah feed). Lalu jalankan
     korelasi XDR + SOAR atas alert baru."""
     init_db()
-    tenant = _get_cfg("tenant") or "default"
+    tenant = _tenant()
     ruleset = get_rules()
     c = _conn()
     rows = c.execute("SELECT * FROM events WHERE ts>=? AND type!='threat_intel' "
@@ -1210,7 +1215,7 @@ def ueba_train(lookback=1209600) -> dict:
     """Latih baseline perilaku UEBA dari event NYATA `lookback` detik terakhir."""
     init_db()
     from nexus_secops import ueba
-    return ueba.train(int(lookback), tenant=_get_cfg("tenant") or "default")
+    return ueba.train(int(lookback), tenant=_tenant())
 
 
 def ueba_scan(window=86400, emit=True) -> dict:
@@ -1218,7 +1223,7 @@ def ueba_scan(window=86400, emit=True) -> dict:
     jadi event `behavior_anomaly` NYATA → rule NEXUS-UEBA-001 → alert → XDR/SOAR."""
     init_db()
     from nexus_secops import ueba
-    tenant = _get_cfg("tenant") or "default"
+    tenant = _tenant()
     res = ueba.score(int(window), tenant=tenant)
     ruleset = get_rules()
     emitted = 0
@@ -1262,7 +1267,7 @@ def cloud_scan(resources=None, prowler=None, provider="aws", account="default") 
     XDR/SOAR/AI. resources/prowler boleh string JSON atau objek."""
     init_db()
     from nexus_secops import cloud
-    tenant = _get_cfg("tenant") or "default"
+    tenant = _tenant()
     if isinstance(resources, str):
         try:
             resources = json.loads(resources) if resources else None
@@ -1311,35 +1316,35 @@ def cloud_scan(resources=None, prowler=None, provider="aws", account="default") 
 
 def cloud_findings(provider="", severity="", status="") -> dict:
     from nexus_secops import cloud
-    return cloud.list_findings(provider, severity, status, 500, _get_cfg("tenant") or "default")
+    return cloud.list_findings(provider, severity, status, 500, _tenant())
 
 
 def cloud_posture() -> dict:
     from nexus_secops import cloud
-    return cloud.posture(_get_cfg("tenant") or "default")
+    return cloud.posture(_tenant())
 
 
 def ai_train() -> dict:
     init_db()
     from nexus_secops import ai
-    return ai.train(_get_cfg("tenant") or "default")
+    return ai.train(_tenant())
 
 
 def ai_triage_all(status="open") -> dict:
     init_db()
     from nexus_secops import ai
-    return ai.triage_all(status, 200, _get_cfg("tenant") or "default")
+    return ai.triage_all(status, 200, _tenant())
 
 
 def ai_triage(incident_id) -> dict:
     init_db()
     from nexus_secops import ai
-    return ai.triage_incident(incident_id, _get_cfg("tenant") or "default")
+    return ai.triage_incident(incident_id, _tenant())
 
 
 def ai_list(priority="") -> dict:
     from nexus_secops import ai
-    return ai.list_triage(200, priority, _get_cfg("tenant") or "default")
+    return ai.list_triage(200, priority, _tenant())
 
 
 def ai_nl(text) -> dict:
@@ -1349,7 +1354,7 @@ def ai_nl(text) -> dict:
 
 def ai_status() -> dict:
     from nexus_secops import ai
-    return ai.model_status(_get_cfg("tenant") or "default")
+    return ai.model_status(_tenant())
 
 
 def get_vulndb() -> list:
@@ -1550,7 +1555,7 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/canary/mint":
             base = body.get("base_url") or ("http://" + self.headers.get("Host", ""))
             r = canary_mint(body.get("type", "url"), body.get("label", ""),
-                            _get_cfg("tenant") or "default", base)
+                            _tenant(), base)
             return self._send(200 if r.get("ok") else 400, r)
         if path == "/canary/delete":
             from nexus_secops import canary
@@ -1559,25 +1564,25 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/airgap":
             return self._send(200, set_air_gapped(bool(body.get("on", True))))
         if path == "/ti/bundle":
-            r = ti_import_bundle(body.get("bundle", body), _get_cfg("tenant") or "default")
+            r = ti_import_bundle(body.get("bundle", body), _tenant())
             return self._send(200 if r.get("ok") else 400, r)
         if path == "/aware/campaign":
             r = aware_create(body.get("name", ""), body.get("template_id", ""),
-                             body.get("targets", []), _get_cfg("tenant") or "default")
+                             body.get("targets", []), _tenant())
             return self._send(200 if r.get("ok") else 400, r)
         if path == "/aware/send":
             base = body.get("base_url") or ("http://" + self.headers.get("Host", ""))
-            r = aware_send(body.get("campaign_id", ""), base, _get_cfg("tenant") or "default")
+            r = aware_send(body.get("campaign_id", ""), base, _tenant())
             return self._send(200 if r.get("ok") else 400, r)
         if path == "/aware/delete":
             from nexus_secops import aware
             r = aware.delete_campaign(body.get("campaign_id", ""))
             return self._send(200 if r.get("ok") else 404, r)
         if path == "/pack/import":
-            r = pack_import(body.get("pack", body), _get_cfg("tenant") or "default")
+            r = pack_import(body.get("pack", body), _tenant())
             return self._send(200 if r.get("ok") else 400, r)
         if path == "/pack/install":
-            r = pack_install(body.get("id", ""), _get_cfg("tenant") or "default")
+            r = pack_install(body.get("id", ""), _tenant())
             return self._send(200 if r.get("ok") else 400, r)
         if path == "/ingest/syslog":
             try:
@@ -1585,7 +1590,7 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception:
                 _src = ""
             r = ingest_syslog(body.get("lines", body.get("line", "")),
-                              body.get("host", _src), _get_cfg("tenant") or "default")
+                              body.get("host", _src), _tenant())
             return self._send(200, r)
         if path == "/license/apply":
             r = apply_license(body.get("token", ""))
@@ -1605,10 +1610,7 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/vulndb":
             r = set_vulndb(body.get("vuln_db", body))
             return self._send(200 if r.get("ok") else 400, r)
-        # Gerbang lisensi SecOps (Pro/Enterprise) untuk seluruh aksi tulis SecOps.
-        if _is_secops_path(path) and not licensing.has(ent(), "secops"):
-            return self._send(403, {"error": "Fitur SecOps butuh lisensi Pro/Enterprise.",
-                                    "feature": "secops"})
+        # (Gerbang lisensi SecOps/premium sudah ditegakkan lebih awal via _is_premium_path.)
         if path == "/xdr/ack":
             from nexus_secops import correlate as xdr
             r = xdr.ack_incident(body.get("id", ""), body.get("status", "ack"))
@@ -1617,12 +1619,12 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/xdr/correlate":
             from nexus_secops import correlate as xdr
             r = xdr.correlate(int(body.get("lookback", 86400)),
-                              tenant=_get_cfg("tenant") or "default")
+                              tenant=_tenant())
             return self._send(200, r)
         if path == "/soar/playbook":
             from nexus_secops import soar
             r = soar.save_playbook(body.get("playbook", body),
-                                   _get_cfg("tenant") or "default")
+                                   _tenant())
             _audit("admin", "soar:save", r.get("id", ""))
             return self._send(200 if r.get("ok") else 400, r)
         if path == "/soar/playbook/enable":
@@ -1641,13 +1643,13 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/soar/run":
             from nexus_secops import soar
             r = soar.run_now(body.get("id", ""), body.get("ref_id", ""),
-                             _get_cfg("tenant") or "default")
+                             _tenant())
             _audit("admin", "soar:run", f"{body.get('id', '')} / {body.get('ref_id', '')}")
             return self._send(200 if r.get("ok") else 400, r)
         if path == "/ti/iocs":
             from nexus_secops import threatintel as ti
             r = ti.add_iocs(body.get("iocs", []), body.get("source", "manual"),
-                            _get_cfg("tenant") or "default")
+                            _tenant())
             _audit("admin", "ti:add", f"{r.get('added', 0)}+{r.get('updated', 0)}")
             return self._send(200 if r.get("ok") else 400, r)
         if path == "/ti/import":
@@ -1660,7 +1662,7 @@ class _Handler(BaseHTTPRequestHandler):
             r = ti.import_feed(body.get("url", ""), body.get("fmt", "text"),
                                body.get("source"), body.get("threat", "feed"),
                                body.get("severity", "high"), int(body.get("col", 0)),
-                               _get_cfg("tenant") or "default")
+                               _tenant())
             _audit("admin", "ti:import", body.get("url", "")[:80])
             return self._send(200 if r.get("ok") else 400, r)
         if path == "/ti/delete":
@@ -1758,11 +1760,7 @@ class _Handler(BaseHTTPRequestHandler):
             q = up.parse_qs(self.path.split("?", 1)[1])
             return (q.get(name, [default]) or [default])[0]
 
-        # --- Nexus SecOps: SIEM search + XDR incidents (lapisan analitik) ---
-        # Gerbang lisensi: seluruh SecOps butuh fitur 'secops' (Pro/Enterprise).
-        if _is_secops_path(path) and not licensing.has(ent(), "secops"):
-            return self._send(403, {"error": "Fitur SecOps butuh lisensi Pro/Enterprise.",
-                                    "feature": "secops"})
+        # (Gerbang lisensi SecOps/premium sudah ditegakkan lebih awal via _is_premium_path.)
         if path == "/search":
             from nexus_secops import siem
             return self._send(200, siem.search(_q("index", "events"), _q("q", ""),
@@ -1777,48 +1775,48 @@ class _Handler(BaseHTTPRequestHandler):
             from nexus_secops import correlate as xdr
             return self._send(200, xdr.list_incidents(_q("status", ""),
                                                       int(_q("limit", "200")),
-                                                      _get_cfg("tenant") or "default"))
+                                                      _tenant()))
         if path == "/xdr/incident":
             from nexus_secops import correlate as xdr
-            r = xdr.get_incident(_q("id", ""), _get_cfg("tenant") or "default")
+            r = xdr.get_incident(_q("id", ""), _tenant())
             return self._send(200 if r.get("ok") else 404, r)
         if path == "/soar/playbooks":
             from nexus_secops import soar
-            return self._send(200, soar.list_playbooks(_get_cfg("tenant") or "default"))
+            return self._send(200, soar.list_playbooks(_tenant()))
         if path == "/soar/runs":
             from nexus_secops import soar
             return self._send(200, soar.list_runs(int(_q("limit", "200")),
-                                                  _get_cfg("tenant") or "default"))
+                                                  _tenant()))
         if path == "/ti/iocs":
             from nexus_secops import threatintel as ti
             return self._send(200, ti.list_iocs(_q("type", ""), _q("q", ""),
                                                 int(_q("limit", "500")),
-                                                _get_cfg("tenant") or "default"))
+                                                _tenant()))
         if path == "/ti/matches":
             from nexus_secops import threatintel as ti
             return self._send(200, ti.list_matches(int(_q("limit", "200")),
-                                                   _get_cfg("tenant") or "default"))
+                                                   _tenant()))
         if path == "/ti/stats":
             from nexus_secops import threatintel as ti
-            return self._send(200, ti.stats(_get_cfg("tenant") or "default"))
+            return self._send(200, ti.stats(_tenant()))
         if path == "/ueba/baselines":
             from nexus_secops import ueba
-            return self._send(200, ueba.list_baselines(_get_cfg("tenant") or "default"))
+            return self._send(200, ueba.list_baselines(_tenant()))
         if path == "/ueba/scores":
             from nexus_secops import ueba
             return self._send(200, ueba.list_scores(int(_q("limit", "200")), _q("band", ""),
-                                                    _get_cfg("tenant") or "default"))
+                                                    _tenant()))
         if path == "/ueba/peers":
             from nexus_secops import ueba
             return self._send(200, ueba.peer_analysis(int(_q("window", "86400")),
-                                                      _get_cfg("tenant") or "default"))
+                                                      _tenant()))
         if path == "/ai/triage":
             from nexus_secops import ai
             return self._send(200, ai.list_triage(int(_q("limit", "200")), _q("priority", ""),
-                                                  _get_cfg("tenant") or "default"))
+                                                  _tenant()))
         if path == "/ai/incident":
             from nexus_secops import ai
-            r = ai.triage_incident(_q("id", ""), _get_cfg("tenant") or "default", record=False)
+            r = ai.triage_incident(_q("id", ""), _tenant(), record=False)
             return self._send(200 if r.get("ok") else 404, r)
         if path == "/ai/model":
             return self._send(200, ai_status())
@@ -1826,40 +1824,40 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, ai_nl(_q("q", "")))
         if path == "/edr/hosts":
             from nexus_secops import edr
-            return self._send(200, edr.hosts(_get_cfg("tenant") or "default"))
+            return self._send(200, edr.hosts(_tenant()))
         if path == "/edr/tree":
             from nexus_secops import edr
             return self._send(200, edr.build_tree(_q("agent_id", ""),
-                                                  _get_cfg("tenant") or "default"))
+                                                  _tenant()))
         if path == "/edr/processes":
             from nexus_secops import edr
             return self._send(200, edr.list_processes(_q("agent_id", ""), _q("q", ""),
-                                                      _get_cfg("tenant") or "default"))
+                                                      _tenant()))
         if path == "/edr/ancestry":
             from nexus_secops import edr
             return self._send(200, edr.ancestry(_q("agent_id", ""), _q("pid", "0"),
-                                                _get_cfg("tenant") or "default"))
+                                                _tenant()))
         if path == "/cloud/findings":
             from nexus_secops import cloud
             return self._send(200, cloud.list_findings(_q("provider", ""), _q("severity", ""),
                                                        _q("status", ""), int(_q("limit", "500")),
-                                                       _get_cfg("tenant") or "default"))
+                                                       _tenant()))
         if path == "/cloud/posture":
             return self._send(200, cloud_posture())
         if path == "/cloud/stats":
             from nexus_secops import cloud
-            return self._send(200, cloud.stats(_get_cfg("tenant") or "default"))
+            return self._send(200, cloud.stats(_tenant()))
         if path == "/ndr/flows":
             from nexus_secops import ndr
             return self._send(200, ndr.list_flows(_q("agent_id", ""), int(_q("limit", "500")),
-                                                  _get_cfg("tenant") or "default"))
+                                                  _tenant()))
         if path == "/ndr/talkers":
             from nexus_secops import ndr
             return self._send(200, ndr.top_talkers(int(_q("window", "86400")),
-                                                   _get_cfg("tenant") or "default"))
+                                                   _tenant()))
         if path == "/ndr/stats":
             from nexus_secops import ndr
-            return self._send(200, ndr.stats(_get_cfg("tenant") or "default"))
+            return self._send(200, ndr.stats(_tenant()))
         if path == "/agents":
             return self._send(200, {"agents": list_agents()["agents"]})
         if path == "/events":
@@ -1886,11 +1884,11 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, replay(_q("agent_id", ""), int(_q("from", "0")),
                                           int(_q("to", "0")), _q("incident", ""),
                                           int(_q("limit", "2000")),
-                                          _get_cfg("tenant") or "default"))
+                                          _tenant()))
         if path == "/airgap":
             return self._send(200, air_gapped_status())
         if path == "/ti/bundle":
-            return self._send(200, ti_export_bundle(_get_cfg("tenant") or "default"))
+            return self._send(200, ti_export_bundle(_tenant()))
         if path == "/report":
             return self._send(200, report(_q("scope", "fleet")))
         if path == "/stats":
@@ -1899,43 +1897,43 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, list_notify())
         if path == "/canary/tokens":
             from nexus_secops import canary
-            return self._send(200, canary.list_tokens(_get_cfg("tenant") or "default"))
+            return self._send(200, canary.list_tokens(_tenant()))
         if path == "/canary/stats":
             from nexus_secops import canary
-            return self._send(200, canary.stats(_get_cfg("tenant") or "default"))
+            return self._send(200, canary.stats(_tenant()))
         if path == "/aware/templates":
             from nexus_secops import aware
             return self._send(200, aware.list_templates())
         if path == "/aware/campaigns":
             from nexus_secops import aware
-            return self._send(200, aware.list_campaigns(_get_cfg("tenant") or "default"))
+            return self._send(200, aware.list_campaigns(_tenant()))
         if path == "/aware/score":
             from nexus_secops import aware
-            return self._send(200, aware.score(_q("campaign", ""), _get_cfg("tenant") or "default"))
+            return self._send(200, aware.score(_q("campaign", ""), _tenant()))
         if path == "/atlas/graph":
             from nexus_secops import atlas
-            return self._send(200, atlas.build_graph(_get_cfg("tenant") or "default",
+            return self._send(200, atlas.build_graph(_tenant(),
                                                      int(_q("window", "604800"))))
         if path == "/atlas/blast":
             from nexus_secops import atlas
             return self._send(200, atlas.blast_radius(_q("node", ""),
-                                                      _get_cfg("tenant") or "default"))
+                                                      _tenant()))
         if path == "/atlas/exposed":
             from nexus_secops import atlas
-            return self._send(200, atlas.top_exposed(_get_cfg("tenant") or "default",
+            return self._send(200, atlas.top_exposed(_tenant(),
                                                      int(_q("limit", "10"))))
         if path == "/atlas/stats":
             from nexus_secops import atlas
-            return self._send(200, atlas.stats(_get_cfg("tenant") or "default"))
+            return self._send(200, atlas.stats(_tenant()))
         if path == "/pack/catalog":
             return self._send(200, pack_catalog())
         if path == "/pack/export":
-            return self._send(200, pack_export(_get_cfg("tenant") or "default"))
+            return self._send(200, pack_export(_tenant()))
         if path == "/comply/frameworks":
             return self._send(200, comply_frameworks())
         if path == "/comply/report":
             return self._send(200, comply_report(_q("framework", "uu-pdp"),
-                                                 _get_cfg("tenant") or "default"))
+                                                 _tenant()))
         return self._send(404, {"error": "endpoint tidak dikenal"})
 
 
@@ -2367,7 +2365,7 @@ def _ai_autostart():
     triase insiden terbuka. Tanpa API/token. Non-fatal."""
     try:
         from nexus_secops import ai
-        r = ai.autostart(_get_cfg("tenant") or "default")
+        r = ai.autostart(_tenant())
         if r.get("ok"):
             log(f"[MANAGER] Nexus AI aktif (lokal) — model {'terlatih' if r.get('trained') else 'mengumpulkan data'}"
                 f" ({r.get('samples', 0)} sampel), {r.get('triaged', 0)} insiden ditriase.")

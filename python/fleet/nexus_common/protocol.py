@@ -23,6 +23,7 @@ import os
 import platform
 import secrets
 import socket
+import sqlite3
 import ssl
 import time
 import uuid
@@ -53,6 +54,18 @@ def _data_dir() -> str:
 
 def manager_db_path() -> str:
     return os.environ.get("NEXUS_FLEET_DB") or os.path.join(_data_dir(), "fleet_manager.db")
+
+
+def connect(timeout: int = 10):
+    """Koneksi SQLite standar ke DB manager (Row factory + busy_timeout).
+    Satu sumber kebenaran — modul SecOps memakai ini, bukan menyalin sendiri."""
+    c = sqlite3.connect(manager_db_path(), timeout=timeout)
+    c.row_factory = sqlite3.Row
+    try:
+        c.execute("PRAGMA busy_timeout=5000")
+    except Exception:
+        pass
+    return c
 
 
 def agent_state_path() -> str:

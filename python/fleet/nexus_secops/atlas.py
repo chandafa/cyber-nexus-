@@ -44,12 +44,8 @@ _FLOW_WINDOW = 604800    # default 7 hari
 
 
 def _sa_conn():
-    """Koneksi mandiri (di luar ingest). Memakai path DB manager yang sama —
-    pola sama persis dengan nexus_secops.canary._sa_conn."""
     from nexus_common import protocol as fc
-    c = sqlite3.connect(fc.manager_db_path(), timeout=10)
-    c.row_factory = sqlite3.Row
-    return c
+    return fc.connect()
 
 
 def _now():

@@ -46,13 +46,7 @@ ACTIVE_HOUR_MIN = 0.5    # jam dianggap "aktif" bila >= 0.5 event/hari pada base
 
 
 def _conn():
-    c = sqlite3.connect(fc.manager_db_path(), timeout=10)
-    c.row_factory = sqlite3.Row
-    try:
-        c.execute("PRAGMA busy_timeout=5000")
-    except Exception:
-        pass
-    return c
+    return fc.connect()
 
 
 def ensure_tables(c):

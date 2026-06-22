@@ -228,8 +228,5 @@ def alert_from_hit(hit) -> dict:
 
 
 def _sa_conn():
-    """Koneksi mandiri (di luar ingest). Memakai path DB manager yg sama."""
     from nexus_common import protocol as fc
-    c = sqlite3.connect(fc.manager_db_path(), timeout=10)
-    c.row_factory = sqlite3.Row
-    return c
+    return fc.connect()
