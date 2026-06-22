@@ -187,15 +187,8 @@ def _now():
 
 
 def _sa_conn():
-    """Koneksi mandiri (di luar ingest). Memakai path DB manager yg sama."""
     from nexus_common import protocol as fc
-    c = sqlite3.connect(fc.manager_db_path(), timeout=10)
-    c.row_factory = sqlite3.Row
-    try:
-        c.execute("PRAGMA busy_timeout=5000")
-    except Exception:
-        pass
-    return c
+    return fc.connect()
 
 
 # --------------------------------------------------------------------------- templates

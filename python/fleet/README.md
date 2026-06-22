@@ -106,7 +106,7 @@ Both install the umbrella command **`nexus`** plus five standalone commands: `ne
 `nexus-agent`, `nexus-cli`, `nexus-dashboard`, `nexus-license`. Requires **Python 3.8+** on the host.
 
 ```bash
-nexus --version       # prints: nexus 2.2.0   (verify the install on any terminal)
+nexus --version       # prints: nexus 2.2.1   (verify the install on any terminal)
 nexus --help          # list sub-commands
 ```
 

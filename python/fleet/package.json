@@ -1,6 +1,6 @@
 {
   "name": "nexus-fleet",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "Nexus Fleet + SecOps — agent/manager/cli/dashboard + SOC brain (SIEM·XDR·EDR·UEBA·SOAR·Threat-Intel·NDR·Cloud·local-AI). npm membungkus engine Python stdlib-only.",
   "keywords": ["security", "soc", "edr", "xdr", "siem", "soar", "ueba", "ndr", "cspm", "threat-intelligence", "agent", "manager", "monitoring", "wazuh", "fleet", "cli"],
   "author": "chandafa (Nexus Security) <ck271138@gmail.com>",
