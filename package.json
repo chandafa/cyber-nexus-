@@ -1,7 +1,7 @@
 {
   "name": "nexus",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.2.0",
   "type": "module",
   "description": "Nexus — developer-first security platform (desktop + fleet).",
   "author": "chandafa (Nexus Security) <ck271138@gmail.com>",

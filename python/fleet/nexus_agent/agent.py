@@ -256,11 +256,26 @@ def _pin_path():
 
 
 def _ensure_tls():
-    """Muat sertifikat manager yang di-pin (TOFU) + sertifikat klien (mTLS) bila HTTPS."""
+    """Muat sertifikat manager yang di-pin (TOFU) + sertifikat klien (mTLS) bila HTTPS.
+
+    Fail-closed: bila belum ada pin, lakukan TOFU (ambil & simpan sertifikat manager
+    pada kontak pertama) lalu verifikasi terhadapnya. TIDAK lagi default insecure —
+    itu membuka MITM (pencurian agent_key saat enroll). Untuk uji, set NEXUS_TLS_INSECURE=1.
+    """
     if _get("manager_scheme", "http") == "https":
         pin = _pin_path()
+        if not os.path.isfile(pin):
+            try:  # TOFU: pin sertifikat manager pada kontak pertama
+                pem = fc.fetch_server_cert(_get("manager_host", fc.DEFAULT_MANAGER_HOST),
+                                           _get("manager_port", fc.DEFAULT_MANAGER_PORT))
+                os.makedirs(os.path.dirname(pin), exist_ok=True)
+                with open(pin, "w", encoding="utf-8") as f:
+                    f.write(pem)
+            except Exception:
+                pass  # gagal TOFU → tanpa pin, verifikasi default (fail-closed)
+        insecure = os.environ.get("NEXUS_TLS_INSECURE") == "1"
         fc.set_client_tls(cafile=pin if os.path.isfile(pin) else "",
-                          insecure=not os.path.isfile(pin),
+                          insecure=insecure,
                           clientcert=os.environ.get("NEXUS_CLIENT_CERT", ""),
                           clientkey=os.environ.get("NEXUS_CLIENT_KEY", ""))
 

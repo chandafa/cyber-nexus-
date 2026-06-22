@@ -1,0 +1,27 @@
+# Nexus pre-commit hooks — shift-left supply-chain scanning.
+#
+# Consumers reference this repo from their own .pre-commit-config.yaml:
+#
+#   repos:
+#     - repo: https://github.com/chandafa/nexus
+#       rev: v1.0.0            # pin to a tag
+#       hooks:
+#         - id: nexus-sbom
+#
+# The hook runs the SBOM + dependency-risk scan as a CI gate. It exits non-zero
+# (blocking the commit) when high/critical findings are detected. Pure-Python,
+# stdlib-only, offline by default — no network calls.
+
+- id: nexus-sbom
+  name: Nexus SBOM + dependency-risk gate
+  description: >-
+    Parse dependency manifests, build a CycloneDX-lite SBOM, cross-reference a
+    local advisory DB, and fail on high/critical findings.
+  entry: python -m nexus_tools scan --path .
+  language: python
+  pass_filenames: false
+  always_run: true
+  # The nexus_tools package lives under python/. When running this hook from a
+  # checkout of the Nexus repo, set PYTHONPATH or invoke from the python/ dir.
+  # For consumers, install the `nexus-tools` package so `python -m nexus_tools`
+  # resolves on PATH.

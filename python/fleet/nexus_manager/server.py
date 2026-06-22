@@ -21,6 +21,7 @@ Endpoint API:
 Selain itu menyajikan **nexus-dashboard** (UI web) di `/` bila berkasnya ada,
 dan mengirim header CORS agar dashboard bisa juga dijalankan dari host lain.
 """
+import hashlib
 import json
 import os
 import socket
@@ -33,6 +34,7 @@ from nexus_common import protocol as fc
 from nexus_common import schema
 from nexus_common import license as licensing
 from nexus_common import cryptobox
+from nexus_common import notify as notifier
 from nexus_common.log import log
 from nexus_manager import rules as ruleengine
 
@@ -189,7 +191,7 @@ def init_db():
     try:
         from nexus_secops import correlate as _xdr, soar as _soar, threatintel as _ti
         from nexus_secops import ueba as _ueba, ai as _ai, edr as _edr, cloud as _cloud
-        from nexus_secops import ndr as _ndr
+        from nexus_secops import ndr as _ndr, canary as _canary, aware as _aware
         _xdr.ensure_tables(c)
         _soar.ensure_tables(c)
         _ti.ensure_tables(c)
@@ -198,6 +200,8 @@ def init_db():
         _edr.ensure_tables(c)
         _cloud.ensure_tables(c)
         _ndr.ensure_tables(c)
+        _canary.ensure_tables(c)
+        _aware.ensure_tables(c)
     except Exception:
         pass
     c.commit()
@@ -219,6 +223,7 @@ def _migrate(c):
         "events": {"event_id": "TEXT", "tenant_id": "TEXT", "source": "TEXT",
                    "category": "TEXT", "event_type": "TEXT", "origin": "TEXT",
                    "host": "TEXT", "target": "TEXT", "evidence": "TEXT"},
+        "audit": {"prev_hash": "TEXT", "hash": "TEXT"},   # tamper-evident hash-chain
     }
     for table, newcols in add.items():
         try:
@@ -229,6 +234,22 @@ def _migrate(c):
             c.commit()
         except Exception:
             pass
+    # Backfill rantai-hash audit untuk baris lama (pra-chain). Menetapkan baseline
+    # tamper-evident saat upgrade; verifikasi forward berlaku sejak titik ini.
+    try:
+        rows = c.execute("SELECT id,ts,actor,action,detail,hash FROM audit "
+                         "ORDER BY id ASC").fetchall()
+        prev = "GENESIS"
+        for r in rows:
+            if r["hash"]:
+                prev = r["hash"]
+                continue
+            h = _audit_hash(prev, r["ts"], r["actor"], r["action"], r["detail"])
+            c.execute("UPDATE audit SET prev_hash=?, hash=? WHERE id=?", (prev, h, r["id"]))
+            prev = h
+        c.commit()
+    except Exception:
+        pass
 
 
 # Nilai rahasia di config dienkripsi at-rest bila NEXUS_MASTER_KEY diset (item #9).
@@ -274,6 +295,10 @@ def _ensure_config():
     if _get_cfg("notify_webhook") is None:
         _set_cfg("notify_webhook", "")
         _set_cfg("notify_min_level", "12")  # default: alert high/critical -> webhook
+    if _get_cfg("notify_channels") is None:
+        _set_cfg("notify_channels", "[]")   # hub multi-channel (telegram/email/slack/dll)
+    if _get_cfg("air_gapped") is None:
+        _set_cfg("air_gapped", "0")         # mode tanpa internet (offline bundle saja)
     if _get_cfg("replay_window") is None:
         _set_cfg("replay_window", str(fc.REPLAY_WINDOW))  # toleransi clock-skew (detik)
     if _get_cfg("api_users") is None:
@@ -288,10 +313,17 @@ def _api_users() -> dict:
 
 
 def _role_of_token(token) -> str:
-    """admin (bootstrap admin_token atau user admin) / viewer / None."""
-    if token and token == (_get_cfg("admin_token") or ""):
+    """admin (bootstrap admin_token atau user admin) / viewer / None.
+    Banding waktu-konstan (anti timing side-channel) — token ini menggerbangi
+    seluruh API admin, jadi jangan pakai '==' yang short-circuit."""
+    if not token:
+        return None
+    if fc.const_eq(token, _get_cfg("admin_token") or ""):
         return "admin"
-    return _api_users().get(token)
+    for tok, role in _api_users().items():
+        if fc.const_eq(token, tok):
+            return role
+    return None
 
 
 def add_user(role="viewer", actor="admin") -> dict:
@@ -318,11 +350,43 @@ def _replay_window() -> int:
         return fc.REPLAY_WINDOW
 
 
+def _audit_hash(prev_hash, ts, actor, action, detail) -> str:
+    """Hash satu entri audit yang merantai ke entri sebelumnya (tamper-evident)."""
+    payload = f"{prev_hash}|{ts}|{actor}|{action}|{detail}".encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def _audit(actor, action, detail=""):
     c = _conn()
-    c.execute("INSERT INTO audit(ts,actor,action,detail) VALUES(?,?,?,?)",
-              (fc.now(), actor, action, detail))
+    # Rantai hash: setiap entri mengikat hash entri sebelumnya. Mengubah/menghapus
+    # entri lama akan memutus rantai (terdeteksi oleh verify_audit) — log forensik
+    # yang anti-rusak untuk Comply.
+    row = c.execute("SELECT hash FROM audit ORDER BY id DESC LIMIT 1").fetchone()
+    prev_hash = (row["hash"] if row and row["hash"] else "GENESIS")
+    ts = fc.now()
+    h = _audit_hash(prev_hash, ts, actor, action, detail)
+    c.execute("INSERT INTO audit(ts,actor,action,detail,prev_hash,hash) VALUES(?,?,?,?,?,?)",
+              (ts, actor, action, detail, prev_hash, h))
     c.commit(); c.close()
+
+
+def verify_audit() -> dict:
+    """Verifikasi integritas rantai audit. Mengembalikan id pertama yang rusak (bila ada)."""
+    init_db()
+    c = _conn()
+    rows = c.execute("SELECT id,ts,actor,action,detail,prev_hash,hash "
+                     "FROM audit ORDER BY id ASC").fetchall()
+    c.close()
+    prev = "GENESIS"
+    tampered = None
+    for r in rows:
+        expect = _audit_hash(prev, r["ts"], r["actor"], r["action"], r["detail"])
+        if (r["prev_hash"] or "GENESIS") != prev or (r["hash"] or "") != expect:
+            tampered = r["id"]
+            break
+        prev = r["hash"]
+    return {"ok": tampered is None, "entries": len(rows), "tampered_at_id": tampered,
+            "tip_hash": (rows[-1]["hash"] if rows else "GENESIS")}
 
 
 def get_rules() -> list:
@@ -413,8 +477,13 @@ def _heartbeat(agent_id, body) -> tuple:
     cmds = [{"id": r["id"], "command": r["command"], "args": json.loads(r["args"] or "{}")}
             for r in rows]
     if cmds:
-        c.execute("UPDATE commands SET status='delivered', delivered_at=? "
-                  "WHERE agent_id=? AND status='queued'", (fc.now(), agent_id))
+        # Tandai 'delivered' HANYA baris yang baru dibaca (by id). Server multi-thread:
+        # menandai semua 'queued' bisa menghapus command yang antre di sela SELECT–UPDATE
+        # (race) sehingga tak pernah terkirim ke agent.
+        ids = [r["id"] for r in rows]
+        ph = ",".join("?" for _ in ids)
+        c.execute(f"UPDATE commands SET status='delivered', delivered_at=? WHERE id IN ({ph})",
+                  (fc.now(), *ids))
     c.commit(); c.close()
     return 200, {"ok": True, "policy_version": _policy_version(), "commands": cmds,
                  "server_time": fc.now()}
@@ -462,6 +531,8 @@ def _ingest_events(agent_id, body) -> tuple:
             ds, da = _run_threatintel(c, ev, ruleset, agent_id, tenant, host)
             stored += ds
             n_alerts += da
+        # Nexus Canary: deteksi sentuhan honeytoken (semua tier — sinyal breach kritis).
+        n_alerts += _run_canary(c, ev, agent_id, tenant)
         # EDR: snapshot proses NYATA (pid/ppid) -> pohon proses + deteksi garis keturunan.
         if ev.get("event_type") == "process_snapshot":
             ds, da = _run_edr(c, ev, ruleset, agent_id, tenant, host)
@@ -553,20 +624,31 @@ def _run_rules(c, ev, ruleset, agent_id, tenant) -> int:
 
 
 def _notify(al):
-    """Kirim alert berat ke webhook (Slack/Discord/HTTP) — best-effort, non-fatal."""
+    """Kirim alert berat ke hub notifikasi (telegram/email/slack/discord/webhook/WA)
+    + webhook legacy — best-effort, non-fatal."""
     try:
-        wh = _get_cfg("notify_webhook") or ""
-        if not wh or al.get("level", 0) < int(_get_cfg("notify_min_level") or "12"):
+        gmin = int(_get_cfg("notify_min_level") or "12")
+        channels = list(_notify_channels())
+        wh = _get_cfg("notify_webhook") or ""          # kompatibilitas mundur
+        if wh:
+            channels.append({"id": "legacy", "type": "webhook", "url": wh, "min_level": gmin})
+        if not channels:
             return
-        text = (f"[NEXUS {al['severity'].upper()}/L{al['level']}] {al['title']} "
-                f"· rule {al['rule'].get('id')} · agent {al['agent_id']}")
-        payload = {"text": text, "content": text,   # Slack(text) & Discord(content)
-                   "alert": {"id": al["id"], "level": al["level"], "severity": al["severity"],
-                             "title": al["title"], "agent_id": al["agent_id"],
-                             "rule": al["rule"].get("id"), "mitre": al["rule"].get("mitre")}}
-        fc._request("POST", wh, fc.canonical(payload), {"Content-Type": "application/json"}, timeout=4)
+        notifier.dispatch(channels, al, gmin)
     except Exception:
         pass
+
+
+def _notify_channels() -> list:
+    try:
+        return json.loads(_get_cfg("notify_channels") or "[]") or []
+    except Exception:
+        return []
+
+
+def _mask(v):
+    s = str(v or "")
+    return ("…" + s[-4:]) if len(s) > 4 else "••••"
 
 
 def set_notify(webhook, min_level=12, actor="admin") -> dict:
@@ -579,6 +661,331 @@ def set_notify(webhook, min_level=12, actor="admin") -> dict:
     _audit(actor, "notify:set", (webhook[:60] if webhook else "(disabled)"))
     return {"ok": True, "webhook_set": bool(webhook),
             "min_level": int(_get_cfg("notify_min_level") or "12")}
+
+
+# ---- Hub notifikasi multi-channel (telegram/email/slack/discord/webhook/whatsapp) ----
+_NOTIFY_SECRET_KEYS = ("bot_token", "password", "token", "url")
+
+
+def add_notify_channel(ch, actor="admin") -> dict:
+    init_db()
+    if not isinstance(ch, dict) or ch.get("type") not in notifier._TYPES:
+        return {"ok": False, "error": f"tipe channel tak didukung: {ch.get('type') if isinstance(ch, dict) else ch}"}
+    chans = _notify_channels()
+    cid = ch.get("id") or ("ch_" + fc.gen_key()[:10])
+    ch["id"] = cid
+    ch.setdefault("enabled", True)
+    chans = [c for c in chans if c.get("id") != cid] + [ch]   # upsert by id
+    _set_cfg("notify_channels", json.dumps(chans))
+    _audit(actor, "notify:channel-add", f"{ch.get('type')} {cid}")
+    return {"ok": True, "id": cid, "count": len(chans)}
+
+
+def remove_notify_channel(cid, actor="admin") -> dict:
+    chans = _notify_channels()
+    new = [c for c in chans if c.get("id") != cid]
+    _set_cfg("notify_channels", json.dumps(new))
+    _audit(actor, "notify:channel-del", cid)
+    return {"ok": True, "removed": len(chans) - len(new), "count": len(new)}
+
+
+def list_notify() -> dict:
+    red = []
+    for c in _notify_channels():
+        cc = {k: (_mask(v) if k in _NOTIFY_SECRET_KEYS else v) for k, v in c.items()}
+        red.append(cc)
+    return {"ok": True, "channels": red,
+            "min_level": int(_get_cfg("notify_min_level") or "12"),
+            "legacy_webhook": bool(_get_cfg("notify_webhook"))}
+
+
+def test_notify(cid="", ch=None, actor="admin") -> dict:
+    if ch is None:
+        ch = next((c for c in _notify_channels() if c.get("id") == cid), None)
+    if not ch:
+        return {"ok": False, "error": "channel tak ditemukan"}
+    sample = {"id": "test", "level": 12, "severity": "high",
+              "title": "Uji notifikasi Nexus", "agent_id": "-",
+              "rule": {"id": "NEXUS-TEST", "mitre": ""},
+              "detail": "Pesan uji dari hub notifikasi Nexus."}
+    r = notifier.send_one(ch, sample)
+    _audit(actor, "notify:test", f"{ch.get('type')} -> {'ok' if r.get('ok') else r.get('error')}")
+    return r
+
+
+# ---- Time-travel incident replay (scrubber forensik atas data NYATA) ----
+def replay(agent_id="", from_ts=0, to_ts=0, incident_id="", limit=2000,
+           tenant="default") -> dict:
+    """Rekonstruksi urutan kronologis event + alert NYATA untuk 'memutar ulang'
+    serangan. Scope: incident XDR, atau agent, atau jendela waktu. Tiap frame
+    membawa hitungan kumulatif sehingga UI bisa men-scrub progres serangan."""
+    init_db()
+    if incident_id:
+        try:
+            from nexus_secops import correlate as xdr
+            r = xdr.get_incident(incident_id, tenant)
+            inc = r.get("incident", r) if isinstance(r, dict) else {}
+            from_ts = from_ts or inc.get("first_ts") or inc.get("ts_start") or 0
+            to_ts = to_ts or inc.get("last_ts") or inc.get("ts_end") or 0
+            ent = str(inc.get("entity", ""))
+            if not agent_id and ent.startswith("agt"):
+                agent_id = ent
+        except Exception:
+            pass
+    to_ts = int(to_ts) or fc.now()
+    from_ts = int(from_ts) or (to_ts - 86400)
+    c = _conn()
+
+    def _rows(table, cols):
+        q = f"SELECT {cols} FROM {table} WHERE ts BETWEEN ? AND ?"
+        p = [from_ts, to_ts]
+        if agent_id:
+            q += " AND agent_id=?"
+            p.append(agent_id)
+        q += " ORDER BY ts ASC LIMIT ?"
+        p.append(int(limit))
+        return c.execute(q, p).fetchall()
+
+    events = _rows("events", "ts,severity,event_type,title,detail,host,agent_id")
+    alerts = _rows("alerts", "ts,level,severity,title,description,rule_id,agent_id")
+    c.close()
+    frames = []
+    for e in events:
+        frames.append({"ts": e["ts"], "ts_iso": fc.iso(e["ts"]), "kind": "event",
+                       "severity": e["severity"], "title": e["title"],
+                       "detail": (e["detail"] or "")[:200], "event_type": e["event_type"],
+                       "agent_id": e["agent_id"]})
+    for a in alerts:
+        frames.append({"ts": a["ts"], "ts_iso": fc.iso(a["ts"]), "kind": "alert",
+                       "level": a["level"], "severity": a["severity"], "title": a["title"],
+                       "detail": (a["description"] or "")[:200], "rule_id": a["rule_id"],
+                       "agent_id": a["agent_id"]})
+    frames.sort(key=lambda f: f["ts"])
+    ev = al = 0
+    for f in frames:
+        if f["kind"] == "event":
+            ev += 1
+        else:
+            al += 1
+        f["cum_events"] = ev
+        f["cum_alerts"] = al
+    return {"ok": True, "scope": {"agent_id": agent_id or None,
+            "incident_id": incident_id or None, "from": from_ts, "to": to_ts},
+            "frame_count": len(frames), "events": ev, "alerts": al, "frames": frames}
+
+
+# ---- Air-gapped mode + offline threat-intel bundle ----
+def is_air_gapped() -> bool:
+    return (_get_cfg("air_gapped") or "0") == "1"
+
+
+def set_air_gapped(on, actor="admin") -> dict:
+    init_db()
+    _set_cfg("air_gapped", "1" if on else "0")
+    _audit(actor, "airgap:set", "on" if on else "off")
+    return {"ok": True, "air_gapped": is_air_gapped()}
+
+
+def air_gapped_status() -> dict:
+    return {"ok": True, "air_gapped": is_air_gapped(),
+            "note": ("Mode air-gapped: pengambilan feed via internet diblokir; pakai "
+                     "bundle offline. Analitik inti tetap jalan lokal." if is_air_gapped()
+                     else "Terhubung normal.")}
+
+
+def ti_export_bundle(tenant="default") -> dict:
+    """Ekspor seluruh IOC jadi bundle portabel (untuk dipindah ke situs air-gapped)."""
+    from nexus_secops import threatintel as ti
+    iocs = ti.list_iocs("", "", 100000, tenant).get("iocs", [])
+    return {"ok": True, "format": "nexus-ti-bundle/1", "exported_at": fc.now(),
+            "tenant": tenant, "count": len(iocs), "iocs": iocs}
+
+
+def ti_import_bundle(bundle, tenant="default", actor="admin") -> dict:
+    """Impor bundle IOC offline (hasil ti_export_bundle) — tanpa internet."""
+    from nexus_secops import threatintel as ti
+    if not isinstance(bundle, dict) or "iocs" not in bundle:
+        return {"ok": False, "error": "bundle tidak valid (butuh field 'iocs')"}
+    r = ti.add_iocs(bundle.get("iocs", []), bundle.get("source", "offline-bundle"), tenant)
+    _audit(actor, "ti:import-bundle", f"{r.get('added', 0)}+{r.get('updated', 0)}")
+    return r
+
+
+# ---- Nexus Hub: content pack (rules + IOC + playbook) export/import/catalog ----
+def _soar_playbooks(tenant):
+    try:
+        from nexus_secops import soar
+        r = soar.list_playbooks(tenant)
+        return r.get("playbooks", r) if isinstance(r, dict) else (r or [])
+    except Exception:
+        return []
+
+
+def pack_export(tenant="default") -> dict:
+    from nexus_secops import threatintel as ti, packs
+    iocs = ti.list_iocs("", "", 100000, tenant).get("iocs", [])
+    return packs.make_bundle("export-" + tenant, rules=get_rules(), iocs=iocs,
+                             playbooks=_soar_playbooks(tenant), now_ts=fc.now())
+
+
+def pack_import(pack, tenant="default", actor="admin") -> dict:
+    from nexus_secops import threatintel as ti, soar, packs
+    if not packs.validate_pack(pack):
+        return {"ok": False, "error": "pack tidak valid (butuh iocs/playbooks/rules)"}
+    applied = {"rules": 0, "iocs": 0, "playbooks": 0}
+    if isinstance(pack.get("rules"), list) and pack["rules"]:
+        set_rules(pack["rules"])
+        applied["rules"] = len(pack["rules"])
+    if pack.get("iocs"):
+        r = ti.add_iocs(pack["iocs"], pack.get("name", "pack"), tenant)
+        applied["iocs"] = r.get("added", 0) + r.get("updated", 0)
+    for pb in pack.get("playbooks", []) or []:
+        try:
+            soar.save_playbook(pb, tenant)
+            applied["playbooks"] += 1
+        except Exception:
+            pass
+    _audit(actor, "pack:import", str(applied))
+    return {"ok": True, "applied": applied}
+
+
+def pack_catalog() -> dict:
+    from nexus_secops import packs
+    return packs.get_catalog()
+
+
+def pack_install(pack_id, tenant="default", actor="admin") -> dict:
+    from nexus_secops import packs
+    p = packs.get_pack(pack_id)
+    if not p:
+        return {"ok": False, "error": "pack tak ada di katalog"}
+    return pack_import({"name": p["name"], "iocs": p.get("iocs", []),
+                        "playbooks": p.get("playbooks", [])}, tenant, actor)
+
+
+# ---- Nexus Edge: ingest syslog AGENTLESS (router/firewall/IoT) ----
+def ingest_syslog(lines, source_ip="", tenant="default", actor="admin") -> dict:
+    """Urai baris syslog → event Nexus → rule engine → alert (+ canary). Untuk
+    perangkat yang tak bisa memasang agent."""
+    from nexus_secops import edge
+    evs = edge.parse_many(lines)
+    if not evs:
+        return {"ok": True, "stored": 0, "alerts": 0}
+    ruleset = get_rules()
+    if not licensing.has(ent(), "advanced_rules"):
+        ruleset = [r for r in ruleset if r.get("tier", "pro") == "free"]
+    aid = "edge:" + (source_ip or "syslog")
+    c = _conn()
+    stored = alerts = 0
+    for ev in evs[:1000]:
+        h = ev.get("host") or {"hostname": source_ip or "syslog"}
+        ev = schema.normalize_event(ev)
+        ev = schema.enrich_event(ev, agent_id=aid, tenant_id=tenant, host=h)
+        _insert_event(c, ev, aid, tenant, h)
+        stored += 1
+        alerts += _run_rules(c, ev, ruleset, aid, tenant)
+        alerts += _run_canary(c, ev, aid, tenant)
+    c.commit(); c.close()
+    _audit(actor, "edge:syslog", f"{stored} baris dari {source_ip or '-'}")
+    return {"ok": True, "stored": stored, "alerts": alerts}
+
+
+# ---- Nexus Aware: orkestrasi kampanye phishing-sim ----
+def aware_create(name, template_id, targets, tenant="default", actor="admin") -> dict:
+    from nexus_secops import aware
+    r = aware.create_campaign(name, template_id, targets, tenant)
+    if r.get("ok"):
+        _audit(actor, "aware:campaign", f"{r.get('campaign_id')} ({r.get('count')} target)")
+    return r
+
+
+def aware_send(campaign_id, base_url="", tenant="default", actor="admin") -> dict:
+    """Render email kampanye lalu kirim via channel email pertama di hub notifikasi."""
+    from nexus_secops import aware
+    rendered = aware.render_emails(campaign_id, base_url, tenant)
+    if not rendered.get("ok"):
+        return rendered
+    email_ch = next((c for c in _notify_channels()
+                     if c.get("type") == "email" and c.get("enabled", True)), None)
+    if not email_ch:
+        return {"ok": True, "sent": 0, "rendered": len(rendered["emails"]),
+                "note": "tak ada channel email di hub notifikasi — email belum dikirim. "
+                        "Tambahkan channel email (notify-add) lalu ulangi.",
+                "emails": rendered["emails"]}
+    sent = fail = 0
+    for em in rendered["emails"]:
+        try:
+            notifier.send_raw_email(email_ch, em["to"], em["subject"], em["body"])
+            sent += 1
+        except Exception:
+            fail += 1
+    _audit(actor, "aware:send", f"{campaign_id}: {sent} terkirim, {fail} gagal")
+    return {"ok": True, "sent": sent, "failed": fail, "total": len(rendered["emails"])}
+
+
+# ---- Nexus Comply: sinyal keadaan NYATA → skor cakupan compliance ----
+def _comply_signals(tenant="default") -> dict:
+    """Kumpulkan sinyal keadaan deployment yang sebenarnya (deterministik)."""
+    import os as _os
+
+    def _safe(fn, default=0):
+        try:
+            return fn()
+        except Exception:
+            return default
+
+    rules = _safe(lambda: get_rules(), [])
+    ev_n = _safe(lambda: _scalar("SELECT COUNT(*) FROM events"), 0)
+    au_n = _safe(lambda: _scalar("SELECT COUNT(*) FROM audit"), 0)
+    users_n = _safe(lambda: len(_api_users()), 0)
+    vdb = _safe(lambda: get_vulndb(), [])
+    iocs_n = _safe(lambda: len(__import__("nexus_secops.threatintel", fromlist=["list_iocs"])
+                              .list_iocs("", "", 1, tenant).get("iocs", [])), 0)
+    pbs_n = _safe(lambda: len(_soar_playbooks(tenant)), 0)
+    canary_n = _safe(lambda: __import__("nexus_secops.canary", fromlist=["stats"])
+                     .stats(tenant).get("tokens", 0), 0)
+    baselines_n = _safe(lambda: len(__import__("nexus_secops.ueba", fromlist=["list_baselines"])
+                        .list_baselines(tenant).get("baselines", [])), 0)
+    ndr_n = _safe(lambda: __import__("nexus_secops.ndr", fromlist=["stats"])
+                  .stats(tenant).get("flows", 0), 0)
+    notify_on = bool(_notify_channels()) or bool(_get_cfg("notify_webhook"))
+    audit_ok = _safe(lambda: verify_audit().get("ok", False), False) and au_n > 0
+    admin_set = bool(_get_cfg("admin_token"))
+    return {
+        "monitoring": ev_n > 0 and len(rules) > 0,
+        "encryption": bool(_os.environ.get("NEXUS_MASTER_KEY")),
+        "rbac": users_n > 0 or admin_set,
+        "audit_present": au_n > 0,
+        "audit_ok": audit_ok,
+        "breach_alerting": notify_on,
+        "incident_response": pbs_n > 0,
+        "ueba": baselines_n > 0,
+        "deception": canary_n > 0,
+        "threat_intel": iocs_n > 0,
+        "malware": len(rules) > 0,
+        "vuln_mgmt": bool(vdb),
+        "auth_security": admin_set,
+        "network_security": ndr_n > 0,
+    }
+
+
+def _scalar(sql, params=()):
+    c = _conn()
+    try:
+        row = c.execute(sql, params).fetchone()
+        return list(row)[0] if row else 0
+    finally:
+        c.close()
+
+
+def comply_frameworks() -> dict:
+    from nexus_secops import comply
+    return comply.list_frameworks()
+
+
+def comply_report(framework, tenant="default") -> dict:
+    from nexus_secops import comply
+    return comply.report(framework, _comply_signals(tenant))
 
 
 def _correlate_vulns(c, inv_ev, ruleset, agent_id, tenant, host):
@@ -644,6 +1051,61 @@ def _run_threatintel(c, src_ev, ruleset, agent_id, tenant, host):
     if n_ev:
         log(f"[MANAGER] Threat Intel: {n_ev} IOC cocok pada telemetri {agent_id}")
     return n_ev, n_al
+
+
+def _emit_canary_alert(c, hit, agent_id, tenant) -> bool:
+    """Bungkus hit canary jadi alert standar (fidelitas tinggi) -> insert + notify."""
+    from nexus_secops import canary
+    al = canary.alert_from_hit(hit)
+    al.update({"id": fc.new_id("alert"), "ts": fc.now(), "agent_id": agent_id or "-",
+               "tenant_id": tenant, "event_ref": "", "status": "open", "origin": "real"})
+    if _alert_duplicate(c, al):
+        return False
+    _insert_alert(c, al)
+    _notify(al)
+    return True
+
+
+def _run_canary(c, src_ev, agent_id, tenant):
+    """Deteksi sentuhan honeytoken (nexus_secops.canary) pada event NYATA -> alert
+    fidelitas tinggi NEXUS-CANARY-001 -> XDR/SOAR/notify. Non-fatal."""
+    try:
+        from nexus_secops import canary
+        hits = canary.match_event(src_ev, tenant, conn=c)   # transaksi yang sama (anti-lock)
+    except Exception as e:
+        log(f"[MANAGER] Canary dilewati: {e}")
+        return 0
+    n = 0
+    for h in hits:
+        if _emit_canary_alert(c, h, agent_id, tenant):
+            n += 1
+    if n:
+        log(f"[MANAGER] Canary: {n} honeytoken terpicu pada telemetri {agent_id}")
+    return n
+
+
+def canary_http_trigger(marker, source="") -> bool:
+    """Picu canary saat URL /c/<marker> diakses (deploy URL/web-bug di mana saja).
+    Buka koneksi sendiri (di luar ingest), catat + emit alert. Non-fatal."""
+    try:
+        from nexus_secops import canary
+        c = _conn()
+        hit = canary.trigger_marker(marker, source, conn=c)
+        if hit:
+            _emit_canary_alert(c, hit, "-", hit.get("tenant", "default"))
+        c.commit(); c.close()
+        return hit is not None
+    except Exception as e:
+        log(f"[MANAGER] Canary HTTP trigger gagal: {e}")
+        return False
+
+
+def canary_mint(typ="url", label="", tenant="default", base_url="", actor="admin") -> dict:
+    from nexus_secops import canary
+    r = canary.mint(typ, label, tenant, base_url)
+    if r.get("ok"):
+        _audit(actor, "canary:mint", f"{typ} {r.get('id')}")
+    return r
 
 
 def _run_edr(c, ev, ruleset, agent_id, tenant, host):
@@ -1059,6 +1521,55 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/notify":
             r = set_notify(body.get("webhook", ""), body.get("min_level", 12))
             return self._send(200, r)
+        if path == "/notify/channel":
+            r = add_notify_channel(body.get("channel", body))
+            return self._send(200 if r.get("ok") else 400, r)
+        if path == "/notify/channel/delete":
+            r = remove_notify_channel(body.get("id", ""))
+            return self._send(200 if r.get("ok") else 400, r)
+        if path == "/notify/test":
+            r = test_notify(body.get("id", ""), body.get("channel"))
+            return self._send(200 if r.get("ok") else 400, r)
+        if path == "/canary/mint":
+            base = body.get("base_url") or ("http://" + self.headers.get("Host", ""))
+            r = canary_mint(body.get("type", "url"), body.get("label", ""),
+                            _get_cfg("tenant") or "default", base)
+            return self._send(200 if r.get("ok") else 400, r)
+        if path == "/canary/delete":
+            from nexus_secops import canary
+            r = canary.delete_token(body.get("id", ""))
+            return self._send(200 if r.get("ok") else 404, r)
+        if path == "/airgap":
+            return self._send(200, set_air_gapped(bool(body.get("on", True))))
+        if path == "/ti/bundle":
+            r = ti_import_bundle(body.get("bundle", body), _get_cfg("tenant") or "default")
+            return self._send(200 if r.get("ok") else 400, r)
+        if path == "/aware/campaign":
+            r = aware_create(body.get("name", ""), body.get("template_id", ""),
+                             body.get("targets", []), _get_cfg("tenant") or "default")
+            return self._send(200 if r.get("ok") else 400, r)
+        if path == "/aware/send":
+            base = body.get("base_url") or ("http://" + self.headers.get("Host", ""))
+            r = aware_send(body.get("campaign_id", ""), base, _get_cfg("tenant") or "default")
+            return self._send(200 if r.get("ok") else 400, r)
+        if path == "/aware/delete":
+            from nexus_secops import aware
+            r = aware.delete_campaign(body.get("campaign_id", ""))
+            return self._send(200 if r.get("ok") else 404, r)
+        if path == "/pack/import":
+            r = pack_import(body.get("pack", body), _get_cfg("tenant") or "default")
+            return self._send(200 if r.get("ok") else 400, r)
+        if path == "/pack/install":
+            r = pack_install(body.get("id", ""), _get_cfg("tenant") or "default")
+            return self._send(200 if r.get("ok") else 400, r)
+        if path == "/ingest/syslog":
+            try:
+                _src = self.client_address[0]
+            except Exception:
+                _src = ""
+            r = ingest_syslog(body.get("lines", body.get("line", "")),
+                              body.get("host", _src), _get_cfg("tenant") or "default")
+            return self._send(200, r)
         if path == "/license/apply":
             r = apply_license(body.get("token", ""))
             return self._send(200 if r.get("ok") else 400, r)
@@ -1124,6 +1635,11 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200 if r.get("ok") else 400, r)
         if path == "/ti/import":
             from nexus_secops import threatintel as ti
+            # Air-gapped: blokir pengambilan feed via internet; pakai bundle offline.
+            if is_air_gapped() and not str(body.get("url", "")).startswith("file:"):
+                return self._send(403, {"ok": False, "feature": "air_gapped",
+                                        "error": "Mode air-gapped: pakai bundle offline "
+                                                 "(/ti/bundle) atau URL file://."})
             r = ti.import_feed(body.get("url", ""), body.get("fmt", "text"),
                                body.get("source"), body.get("threat", "feed"),
                                body.get("severity", "high"), int(body.get("col", 0)),
@@ -1169,6 +1685,39 @@ class _Handler(BaseHTTPRequestHandler):
             if (fpath == _DASHBOARD_DIR or fpath.startswith(_DASHBOARD_DIR + os.sep)) \
                     and os.path.isfile(fpath):
                 return self._send_file(fpath)
+        # Endpoint canary PUBLIK: akses /c/<marker> = sinyal breach. Deploy URL ini
+        # sbg link/web-bug di mana saja; siapa pun yang mengaksesnya memicu alert.
+        if full.startswith("/c/"):
+            marker = full[3:].split("/")[0].strip()
+            try:
+                src = self.client_address[0]
+            except Exception:
+                src = ""
+            if marker:
+                canary_http_trigger(marker, f"http:{src} ua={self.headers.get('User-Agent','')[:80]}")
+            return self._send(200, {"ok": True})   # respon benign (tak bocor ke penyerang)
+        # Pelacakan Nexus Aware: /aw/<token> = target mengeklik link phishing-sim.
+        if full.startswith("/aw/"):
+            token = full[4:].split("/")[0].strip()
+            try:
+                from nexus_secops import aware
+                src = self.client_address[0]
+                aware.record(token, "click", f"http:{src}")
+            except Exception:
+                pass
+            # halaman edukasi ringan (training), bukan API
+            html = (b"<!doctype html><meta charset=utf-8><title>Simulasi Keamanan Nexus</title>"
+                    b"<h2>Ini simulasi phishing dari tim keamanan.</h2>"
+                    b"<p>Tautan asli bisa berbahaya. Selalu periksa pengirim & URL.</p>")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(html)))
+            self.end_headers()
+            try:
+                self.wfile.write(html)
+            except Exception:
+                pass
+            return
         path = self._path()
         if path == "/health":
             return self._send(200, {"ok": True, "service": "nexus-manager",
@@ -1309,10 +1858,62 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, {"vuln_db": get_vulndb()})
         if path == "/audit":
             return self._send(200, list_audit(int(_q("limit", "200"))))
+        if path == "/audit/verify":
+            return self._send(200, verify_audit())
+        if path == "/replay":
+            return self._send(200, replay(_q("agent_id", ""), int(_q("from", "0")),
+                                          int(_q("to", "0")), _q("incident", ""),
+                                          int(_q("limit", "2000")),
+                                          _get_cfg("tenant") or "default"))
+        if path == "/airgap":
+            return self._send(200, air_gapped_status())
+        if path == "/ti/bundle":
+            return self._send(200, ti_export_bundle(_get_cfg("tenant") or "default"))
         if path == "/report":
             return self._send(200, report(_q("scope", "fleet")))
         if path == "/stats":
             return self._send(200, stats())
+        if path == "/notify":
+            return self._send(200, list_notify())
+        if path == "/canary/tokens":
+            from nexus_secops import canary
+            return self._send(200, canary.list_tokens(_get_cfg("tenant") or "default"))
+        if path == "/canary/stats":
+            from nexus_secops import canary
+            return self._send(200, canary.stats(_get_cfg("tenant") or "default"))
+        if path == "/aware/templates":
+            from nexus_secops import aware
+            return self._send(200, aware.list_templates())
+        if path == "/aware/campaigns":
+            from nexus_secops import aware
+            return self._send(200, aware.list_campaigns(_get_cfg("tenant") or "default"))
+        if path == "/aware/score":
+            from nexus_secops import aware
+            return self._send(200, aware.score(_q("campaign", ""), _get_cfg("tenant") or "default"))
+        if path == "/atlas/graph":
+            from nexus_secops import atlas
+            return self._send(200, atlas.build_graph(_get_cfg("tenant") or "default",
+                                                     int(_q("window", "604800"))))
+        if path == "/atlas/blast":
+            from nexus_secops import atlas
+            return self._send(200, atlas.blast_radius(_q("node", ""),
+                                                      _get_cfg("tenant") or "default"))
+        if path == "/atlas/exposed":
+            from nexus_secops import atlas
+            return self._send(200, atlas.top_exposed(_get_cfg("tenant") or "default",
+                                                     int(_q("limit", "10"))))
+        if path == "/atlas/stats":
+            from nexus_secops import atlas
+            return self._send(200, atlas.stats(_get_cfg("tenant") or "default"))
+        if path == "/pack/catalog":
+            return self._send(200, pack_catalog())
+        if path == "/pack/export":
+            return self._send(200, pack_export(_get_cfg("tenant") or "default"))
+        if path == "/comply/frameworks":
+            return self._send(200, comply_frameworks())
+        if path == "/comply/report":
+            return self._send(200, comply_report(_q("framework", "uu-pdp"),
+                                                 _get_cfg("tenant") or "default"))
         return self._send(404, {"error": "endpoint tidak dikenal"})
 
 
@@ -1510,7 +2111,8 @@ def list_audit(limit=200) -> dict:
     rows = c.execute("SELECT * FROM audit ORDER BY id DESC LIMIT ?", (int(limit),)).fetchall()
     c.close()
     return {"audit": [{"ts": r["ts"], "ts_iso": fc.iso(r["ts"]), "actor": r["actor"],
-                       "action": r["action"], "detail": r["detail"]} for r in rows]}
+                       "action": r["action"], "detail": r["detail"],
+                       "hash": (r["hash"][:16] + "…") if r["hash"] else None} for r in rows]}
 
 
 def _domain_for(rule_id: str) -> str:

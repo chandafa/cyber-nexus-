@@ -40,6 +40,16 @@ export const PRO_ROUTES: string[] = [
   "/ndr",
   "/cloud-cspm",
   "/ai-triage",
+  // Ekosistem (W1-W4) — /audit-log free (read), sisanya Pro
+  "/notifications",
+  "/canary",
+  "/aware",
+  "/atlas",
+  "/comply",
+  "/content-packs",
+  "/replay",
+  "/airgap",
+  "/syslog",
 ];
 
 const PRO_SET = new Set(PRO_ROUTES);

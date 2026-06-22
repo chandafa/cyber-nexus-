@@ -3,6 +3,69 @@
 All notable changes to **Nexus Fleet** (`nexus-fleet`) are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.2.0] — 2026-06
+### Added
+- **Ecosystem expansion** — Notification Hub (Telegram/Email/Slack/Discord/Webhook/WhatsApp),
+  tamper-evident hash-chained audit log, shift-left SBOM scanner + CI gate, Nexus Canary
+  honeytokens, "Ask Nexus" local AI persona, time-travel incident replay, air-gapped mode +
+  offline threat-intel bundle, Nexus Aware (phishing-sim, Indonesian templates), Nexus Atlas
+  (attack-path graph + blast radius), Nexus Hub (content packs), Nexus Edge (agentless syslog
+  ingestion), and Nexus Comply (UU PDP + ISO 27001 coverage scoring).
+- **Desktop & CLI parity** — every new feature is reachable from the GUI (new "Ekosistem" group),
+  the `nexus-cli` console, and the desktop runner; all Pro-gated except the read-only audit view.
+- **Nexus Mobile** — Expo/React Native companion app (separate repo).
+### Fixed (security & correctness hardening)
+- Heartbeat command-delivery race, SSRF in threat-intel feed import, non-constant-time admin-token
+  comparison, agent TLS fail-open (now TOFU/fail-closed), CSPRNG auth tokens, a WAF request-handler
+  NameError, and eBPF status honesty (no false "Live" label). +10 test suites (20/20 green).
+
+## [2.1.0] — 2026-06
+### Added
+- **SecOps in the desktop GUI & CLI** — the nine SecOps pillars (SIEM, XDR correlation, EDR,
+  UEBA, SOAR, Threat Intelligence, NDR, Cloud/CSPM, AI triage) are now surfaced in the desktop
+  app and the `nexus` CLI, not only the dashboard.
+- **Full GUI ↔ CLI parity** — every SecOps capability reachable from the desktop app is also
+  reachable from the command line (and vice-versa), with consistent output.
+### Changed
+- **Pro-gated SecOps** — SecOps features are gated behind the Pro/Enterprise license in both the
+  GUI and CLI, consistent with the rest of the platform.
+- Single source of truth for the product version (`nexus_common.__version__`); all components and
+  `--version` strings now read **2.1.0**.
+
+## [2.0.0] — 2026-06
+### Added
+- **Nexus SecOps subsystem** — Nexus grows from a Wazuh-style fleet into a full SOC platform.
+  Nine focused security capabilities, de-duplicated from twenty enterprise tools, all shipping
+  inside the same `nexus-fleet` package (one install, one agent, modules inside):
+  - **SIEM** — log analytics with the **NQL** query language + aggregations (Splunk SPL / Elastic /
+    QRadar / Graylog style) over the existing manager event/alert store.
+  - **XDR correlation** — fuse alerts across time and source into single kill-chain incidents
+    (Microsoft Defender XDR / Cortex XDR style).
+  - **EDR** — process-tree (pid/ppid) reconstruction + suspicious-lineage detection.
+  - **UEBA** — per-entity behavioral baselines + anomaly scoring.
+  - **SOAR** — playbooks (trigger → steps) driving **real** Fleet active-response + webhooks.
+  - **Threat Intelligence** — IOC database + matching against real telemetry + feed import.
+  - **NDR** — beaconing/C2, port-scan and IOC-connection detection.
+  - **Cloud / CSPM** — cloud-config scoring against CIS + Prowler import.
+  - **AI triage** — local Naive-Bayes + heuristic + NLG triage engine (no external API/token).
+- **Dashboard SecOps views** — each pillar surfaced in the web dashboard.
+### Notes
+- The 1.3.0 → 2.0.0 line built the SecOps pillars incrementally on the shared Fleet data plane.
+
+## [1.2.1] — 2026-06
+### Added
+- **`nexus` umbrella CLI** — a single entry point that dispatches to `manager`, `agent`, `cli`,
+  `dashboard` and `license`, with a unified `nexus --version`.
+### Fixed
+- **Seat licensing** — Pro tier now correctly allows **50** seats (was incorrectly capped at 2).
+### Changed
+- **Dashboard SPA redesign** — refreshed single-page dashboard.
+
+## [1.1.0] — 2026-06
+### Changed
+- **Publish & copyright prep** — copyright/license headers applied across the codebase and
+  packaging metadata aligned for publication (npm / PyPI / landing).
+
 ## [1.0.9] — 2026-06
 ### Fixed / Improved
 - **Correct authz status** — authenticated-but-unauthorized (viewer) writes return **403** (not 401).

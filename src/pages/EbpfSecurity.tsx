@@ -222,7 +222,7 @@ export const EbpfSecurity: React.FC = () => {
                 <div className="flex justify-between py-1 border-b border-nexus-hairline">
                   <span className="text-nexus-muted">Mode:</span>
                   <span className={`font-semibold ${status.mode === "Live" ? "text-green-400 animate-pulse" : "text-amber-400"}`}>
-                    {status.mode === "Live" ? "Linux Kernel (Live)" : "Windows Host (Mock)"}
+                    {status.mode === "Live" ? "Linux Kernel (Live)" : "Simulated (demo data)"}
                   </span>
                 </div>
               </div>

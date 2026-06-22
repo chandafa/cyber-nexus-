@@ -61,6 +61,17 @@ import { ThreatIntel } from "../pages/secops/ThreatIntel";
 import { Ndr } from "../pages/secops/Ndr";
 import { CloudCspm } from "../pages/secops/CloudCspm";
 import { AiTriage } from "../pages/secops/AiTriage";
+// Ekosistem (W1-W4)
+import NexusNotifications from "../pages/NexusNotifications";
+import NexusCanary from "../pages/NexusCanary";
+import NexusAudit from "../pages/NexusAudit";
+import NexusReplay from "../pages/NexusReplay";
+import NexusAirgap from "../pages/NexusAirgap";
+import NexusAware from "../pages/NexusAware";
+import NexusAtlas from "../pages/NexusAtlas";
+import NexusComply from "../pages/NexusComply";
+import NexusContentPacks from "../pages/NexusContentPacks";
+import NexusSyslog from "../pages/NexusSyslog";
 
 export const router = createHashRouter([
   { path: "/setup", element: <SetupWizard /> },
@@ -82,6 +93,7 @@ export const router = createHashRouter([
       { path: "wordlist-manager", element: <WordlistManager /> },
       { path: "history", element: <History /> },
       { path: "settings", element: <Settings /> },
+      { path: "audit-log", element: <NexusAudit /> },
 
       // -------- Pro (butuh lisensi; dijaga ProRouteGuard) --------
       // Sinkron dengan lib/proModules.ts PRO_ROUTES & desktop_license.PRO_COMMANDS.
@@ -121,6 +133,16 @@ export const router = createHashRouter([
           { path: "ndr", element: <Ndr /> },
           { path: "cloud-cspm", element: <CloudCspm /> },
           { path: "ai-triage", element: <AiTriage /> },
+          // -------- Ekosistem (W1-W4) --------
+          { path: "notifications", element: <NexusNotifications /> },
+          { path: "canary", element: <NexusCanary /> },
+          { path: "aware", element: <NexusAware /> },
+          { path: "atlas", element: <NexusAtlas /> },
+          { path: "comply", element: <NexusComply /> },
+          { path: "content-packs", element: <NexusContentPacks /> },
+          { path: "replay", element: <NexusReplay /> },
+          { path: "airgap", element: <NexusAirgap /> },
+          { path: "syslog", element: <NexusSyslog /> },
         ],
       },
     ],

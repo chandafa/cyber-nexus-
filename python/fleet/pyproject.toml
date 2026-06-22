@@ -13,7 +13,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nexus-fleet"
-version = "2.1.0"
+version = "2.2.0"
 description = "Nexus Fleet — agent/manager/cli/dashboard keamanan endpoint (ala-Wazuh, ringan, stdlib-only)"
 readme = "README.md"
 requires-python = ">=3.8"
