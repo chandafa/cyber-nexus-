@@ -117,6 +117,22 @@ const GROUPS: { title: string; icon: IconComp; items: NavItem[] }[] = [
     ],
   },
   {
+    title: "Ekosistem",
+    icon: Ic.suite,
+    items: [
+      { to: "/notifications", label: "Hub Notifikasi", icon: Ic.activity },
+      { to: "/canary", label: "Canary (Honeytokens)", icon: Ic.attack },
+      { to: "/aware", label: "Aware (Phishing-sim)", icon: Ic.human },
+      { to: "/atlas", label: "Atlas (Attack-path)", icon: Ic.mapper },
+      { to: "/comply", label: "Comply (UU PDP/ISO)", icon: Ic.report },
+      { to: "/content-packs", label: "Content Packs", icon: Ic.container },
+      { to: "/replay", label: "Time-travel Replay", icon: Ic.history },
+      { to: "/audit-log", label: "Audit Log", icon: Ic.log },
+      { to: "/airgap", label: "Air-gapped + Bundle", icon: Ic.server },
+      { to: "/syslog", label: "Edge — Syslog", icon: Ic.network },
+    ],
+  },
+  {
     title: "Sistem",
     icon: Ic.settings,
     items: [

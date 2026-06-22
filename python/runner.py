@@ -166,6 +166,21 @@ def dispatch(command: str, kwargs: dict) -> dict:
             sanitize_filepath(lp)
         return log_analyzer.run(lp, kwargs.get('log_type', 'auto'))
 
+    if command == 'sbom_scan':
+        from modules import sbom
+        # SBOM = tool FREE (tidak ada di PRO_COMMANDS, jadi guard() melewatinya).
+        # path divalidasi sbg filepath bila diberikan; default '.'.
+        p = kwargs.get('path', '.') or '.'
+        if p not in ('.', './'):
+            sanitize_filepath(p)
+        mf = kwargs.get('manifest', '')
+        if mf:
+            sanitize_filepath(mf)
+        return sbom.run(path=p, manifest=mf,
+                        vulndb=kwargs.get('vulndb', ''),
+                        online=kwargs.get('online', 'false'),
+                        emit_sbom=kwargs.get('emit_sbom', 'false'))
+
     if command == 'network_map':
         from modules import network_mapper
         target = sanitize_target(kwargs.get('target', ''))
@@ -639,6 +654,10 @@ def dispatch(command: str, kwargs: dict) -> dict:
         from modules import fleet_manager
         return fleet_manager.add_user(kwargs.get('role', 'viewer'))
 
+    if command == 'fleet_users_list':
+        from modules import fleet_manager
+        return fleet_manager.list_users()
+
     if command == 'fleet_vulndb_get':
         from modules import fleet_manager
         return {'module': 'fleet_manager', 'vuln_db': fleet_manager.get_vulndb()}
@@ -650,6 +669,124 @@ def dispatch(command: str, kwargs: dict) -> dict:
     if command == 'fleet_sigma_import':
         from modules import fleet_manager
         return fleet_manager.import_sigma(kwargs.get('sigma', '[]'))
+
+    # ---------------------------------------------- fitur ekosistem baru (W1-W4)
+    if command == 'fleet_audit_verify':
+        from modules import fleet_manager
+        return fleet_manager.verify_audit()
+    if command == 'fleet_replay':
+        from modules import fleet_manager
+        return fleet_manager.replay(kwargs.get('agent_id', ''),
+                                    int(kwargs.get('from_ts', 0) or 0),
+                                    int(kwargs.get('to_ts', 0) or 0),
+                                    kwargs.get('incident', ''),
+                                    int(kwargs.get('limit', 2000)))
+    if command == 'fleet_airgap_status':
+        from modules import fleet_manager
+        return fleet_manager.air_gapped_status()
+    if command == 'fleet_airgap_set':
+        from modules import fleet_manager
+        return fleet_manager.set_air_gapped(str(kwargs.get('on', 'false')).lower() == 'true')
+    if command == 'fleet_ti_export':
+        from modules import fleet_manager
+        return fleet_manager.ti_export_bundle()
+    if command == 'fleet_ti_import_bundle':
+        import json as _json
+        from modules import fleet_manager
+        b = kwargs.get('bundle', '{}')
+        return fleet_manager.ti_import_bundle(_json.loads(b) if isinstance(b, str) else b)
+    # Notification Hub
+    if command == 'fleet_notify_list':
+        from modules import fleet_manager
+        return fleet_manager.list_notify()
+    if command == 'fleet_notify_add':
+        import json as _json
+        from modules import fleet_manager
+        ch = kwargs.get('channel', '{}')
+        return fleet_manager.add_notify_channel(_json.loads(ch) if isinstance(ch, str) else ch)
+    if command == 'fleet_notify_del':
+        from modules import fleet_manager
+        return fleet_manager.remove_notify_channel(kwargs.get('id', ''))
+    if command == 'fleet_notify_test':
+        from modules import fleet_manager
+        return fleet_manager.test_notify(kwargs.get('id', ''))
+    # Nexus Canary
+    if command == 'fleet_canary_mint':
+        from modules import fleet_manager
+        return fleet_manager.canary_mint(kwargs.get('type', 'url'), kwargs.get('label', ''))
+    if command == 'fleet_canary_list':
+        from modules import fleet_manager
+        return fleet_manager.canary_list()
+    if command == 'fleet_canary_del':
+        from modules import fleet_manager
+        return fleet_manager.canary_delete(kwargs.get('id', ''))
+    if command == 'fleet_canary_stats':
+        from modules import fleet_manager
+        return fleet_manager.canary_stats()
+    # Nexus Aware
+    if command == 'fleet_aware_templates':
+        from modules import fleet_manager
+        return fleet_manager.aware_templates()
+    if command == 'fleet_aware_campaigns':
+        from modules import fleet_manager
+        return fleet_manager.aware_campaigns()
+    if command == 'fleet_aware_score':
+        from modules import fleet_manager
+        return fleet_manager.aware_score(kwargs.get('campaign', ''))
+    if command == 'fleet_aware_new':
+        import json as _json
+        from modules import fleet_manager
+        t = kwargs.get('targets', '[]')
+        return fleet_manager.aware_create(kwargs.get('name', ''), kwargs.get('template_id', ''),
+                                          _json.loads(t) if isinstance(t, str) else t)
+    if command == 'fleet_aware_send':
+        from modules import fleet_manager
+        return fleet_manager.aware_send(kwargs.get('campaign_id', ''), kwargs.get('base_url', ''))
+    if command == 'fleet_aware_del':
+        from modules import fleet_manager
+        return fleet_manager.aware_delete(kwargs.get('campaign_id', ''))
+    # Nexus Atlas
+    if command == 'fleet_atlas_graph':
+        from modules import fleet_manager
+        return fleet_manager.atlas_graph()
+    if command == 'fleet_atlas_blast':
+        from modules import fleet_manager
+        return fleet_manager.atlas_blast(kwargs.get('node', ''))
+    if command == 'fleet_atlas_exposed':
+        from modules import fleet_manager
+        return fleet_manager.atlas_exposed(limit=int(kwargs.get('limit', 10)))
+    if command == 'fleet_atlas_stats':
+        from modules import fleet_manager
+        return fleet_manager.atlas_stats()
+    # Nexus Hub (content packs)
+    if command == 'fleet_pack_catalog':
+        from modules import fleet_manager
+        return fleet_manager.pack_catalog()
+    if command == 'fleet_pack_export':
+        from modules import fleet_manager
+        return fleet_manager.pack_export()
+    if command == 'fleet_pack_import':
+        import json as _json
+        from modules import fleet_manager
+        p = kwargs.get('pack', '{}')
+        return fleet_manager.pack_import(_json.loads(p) if isinstance(p, str) else p)
+    if command == 'fleet_pack_install':
+        from modules import fleet_manager
+        return fleet_manager.pack_install(kwargs.get('id', ''))
+    # Nexus Edge (syslog agentless)
+    if command == 'fleet_syslog_ingest':
+        from modules import fleet_manager
+        lines = kwargs.get('lines', '')
+        if isinstance(lines, str):
+            lines = lines.splitlines()
+        return fleet_manager.ingest_syslog(lines, kwargs.get('host', ''))
+    # Nexus Comply
+    if command == 'fleet_comply_frameworks':
+        from modules import fleet_manager
+        return fleet_manager.comply_frameworks()
+    if command == 'fleet_comply_report':
+        from modules import fleet_manager
+        return fleet_manager.comply_report(kwargs.get('framework', 'uu-pdp'))
 
     if command == 'fleet_respond':
         from modules import fleet_manager

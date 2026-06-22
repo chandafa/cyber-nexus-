@@ -561,6 +561,7 @@ class WAFHandler(http.server.BaseHTTPRequestHandler):
         max_rps = config['max_rps']
         learning_mode = config['learning_mode']
         allowlist_ips = config['allowlist_ips']
+        allowlist_paths = config.get('allowlist_paths', [])   # fix: tak pernah di-assign → NameError tiap request
         enabled_rules_list = config['rules']
 
         # Check IP blacklist

@@ -21,6 +21,7 @@ import hmac
 import json
 import os
 import platform
+import secrets
 import socket
 import ssl
 import time
@@ -72,7 +73,9 @@ def new_id(prefix: str) -> str:
 
 
 def gen_key() -> str:
-    return uuid.uuid4().hex + uuid.uuid4().hex
+    # Token autentikasi (admin/enroll/agent/user). CSPRNG, bukan uuid4 — uuid4
+    # tidak dijamin kriptografis & bit versi/variannya tetap (entropi berkurang).
+    return secrets.token_hex(32)
 
 
 def host_fingerprint() -> dict:
@@ -108,6 +111,15 @@ def sign(key: str, raw: bytes) -> str:
 def verify(key: str, raw: bytes, sig: str) -> bool:
     try:
         return hmac.compare_digest(sign(key, raw), sig or "")
+    except Exception:
+        return False
+
+
+def const_eq(a: str, b: str) -> bool:
+    """Perbandingan string waktu-konstan (anti timing side-channel) untuk
+    token/secret. Pakai ini, bukan ==, saat membandingkan admin/API token."""
+    try:
+        return hmac.compare_digest((a or "").encode("utf-8"), (b or "").encode("utf-8"))
     except Exception:
         return False
 

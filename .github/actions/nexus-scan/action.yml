@@ -1,0 +1,50 @@
+name: "Nexus Supply-Chain Scan"
+description: >-
+  Shift-left SBOM + dependency-risk gate. Parses dependency manifests, builds a
+  CycloneDX-lite SBOM, cross-references a local advisory DB, and fails the build
+  on high/critical findings. Pure-Python, stdlib-only, offline by default.
+author: "Nexus Security"
+branding:
+  icon: "shield"
+  color: "purple"
+
+inputs:
+  path:
+    description: "Directory to scan for dependency manifests."
+    required: false
+    default: "."
+  python-version:
+    description: "Python version to set up."
+    required: false
+    default: "3.11"
+  working-directory:
+    description: >-
+      Directory that contains the Nexus `python/` package tree (where
+      `nexus_tools` lives). Defaults to the repo's python/ folder.
+    required: false
+    default: "python"
+  emit-sbom:
+    description: "Set to 'true' to include the CycloneDX SBOM document in JSON output."
+    required: false
+    default: "false"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Run Nexus SBOM CI gate
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        SCAN_PATH: ${{ inputs.path }}
+        EMIT_SBOM: ${{ inputs.emit-sbom }}
+      run: |
+        # `scan` is the aggregate CI gate. It prints the SBOM result as JSON to
+        # stdout and exits non-zero when high/critical findings are present.
+        EXTRA=""
+        if [ "${EMIT_SBOM}" = "true" ]; then EXTRA="--emit-sbom"; fi
+        python -m nexus_tools scan --path "${SCAN_PATH}" ${EXTRA}

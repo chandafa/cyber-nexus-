@@ -140,6 +140,9 @@ def main():
           block and "203.0.113.66" in block[0]["detail"])
 
     print("== import_feed NYATA via urllib (file://) ==")
+    # file:// & host lokal ditolak secara default (anti-SSRF); operator mengizinkannya
+    # secara eksplisit lewat env untuk impor feed lokal/air-gapped.
+    os.environ["NEXUS_TI_ALLOW_LOCAL"] = "1"
     feed = pathlib.Path(_tmp) / "feodo.txt"
     feed.write_text("# Feodo Tracker botnet C2 IPs\n; comment\n198.51.100.7\n198.51.100.8 443\n",
                     encoding="utf-8")

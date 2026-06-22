@@ -1,0 +1,30 @@
+name: Nexus Supply-Chain Scan (example)
+
+# Example consumer workflow. Runs the Nexus shift-left SBOM + dependency-risk
+# gate on every pull request. The build fails when high/critical findings are
+# detected (the `scan` subcommand exits non-zero in that case).
+
+on:
+  pull_request:
+    branches: [ main, master ]
+  push:
+    branches: [ main, master ]
+
+permissions:
+  contents: read
+
+jobs:
+  supply-chain-scan:
+    name: SBOM + dependency-risk gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Nexus supply-chain scan
+        uses: ./.github/actions/nexus-scan
+        with:
+          path: "."
+          python-version: "3.11"
+          working-directory: "python"
+          emit-sbom: "true"
