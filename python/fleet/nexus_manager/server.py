@@ -1412,9 +1412,21 @@ _STATIC = {".html": "text/html; charset=utf-8", ".js": "application/javascript",
 _SECOPS_PREFIXES = ("/search", "/siem", "/xdr", "/ai", "/edr", "/ueba", "/ti",
                     "/cloud", "/ndr", "/soar")
 
+# Fitur ekosistem premium (W1-W4) — juga butuh lisensi Pro/Enterprise. Dijaga di
+# Manager API agar gerbang lisensi berlaku SERAGAM di semua surface yang memakai API
+# (CLI, mobile, dashboard). Endpoint publik (/c/, /aw/) & /audit list tetap bebas.
+_PREMIUM_PREFIXES = ("/canary", "/aware", "/atlas", "/comply", "/pack", "/replay",
+                     "/notify", "/airgap", "/ingest/syslog", "/audit/verify", "/ti/bundle")
+
 
 def _is_secops_path(path):
     return any(path == p or path.startswith(p + "/") for p in _SECOPS_PREFIXES)
+
+
+def _is_premium_path(path):
+    """SecOps (9 pilar) ATAU fitur ekosistem premium — semua butuh lisensi Pro."""
+    return _is_secops_path(path) or any(
+        path == p or path.startswith(p + "/") for p in _PREMIUM_PREFIXES)
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -1505,6 +1517,11 @@ class _Handler(BaseHTTPRequestHandler):
             # 403: terautentikasi (viewer) tapi tak berwenang · 401: tak terautentikasi
             return self._send(403 if role else 401,
                               {"error": "butuh peran admin" if role else "admin token diperlukan"})
+        # Gerbang lisensi Pro untuk SecOps + fitur ekosistem premium (W1-W4) — berlaku
+        # untuk semua surface yang menulis lewat API (CLI, mobile, dashboard).
+        if _is_premium_path(path) and not licensing.has(ent(), "secops"):
+            return self._send(403, {"error": "Fitur premium butuh lisensi Pro/Enterprise.",
+                                    "feature": "secops"})
         if path == "/policy":
             return self._send(*_set_policy_api(body))
         if path == "/command":
@@ -1728,6 +1745,11 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, license_status())
         if not self._can_read():          # RBAC: admin atau viewer boleh baca
             return self._send(401, {"error": "token admin/viewer diperlukan"})
+        # Gerbang lisensi Pro: SecOps (9 pilar) + fitur ekosistem premium (W1-W4).
+        # Berlaku seragam untuk CLI/mobile/dashboard yang membaca lewat API.
+        if _is_premium_path(path) and not licensing.has(ent(), "secops"):
+            return self._send(403, {"error": "Fitur premium butuh lisensi Pro/Enterprise.",
+                                    "feature": "secops"})
 
         def _q(name, default):
             if "?" not in self.path:
